@@ -1,0 +1,52 @@
+import '@babylonjs/core/Culling/ray'
+
+const controls = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
+
+export function createMovementInput(canvas, scene, isPlaying) {
+  const keys = new Set()
+  let destination = null
+  const clear = () => { keys.clear(); destination = null }
+  const onDown = (event) => {
+    if (!isPlaying() || !controls.has(event.code) || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName)) return
+    event.preventDefault()
+    keys.add(event.code)
+    destination = null
+  }
+  const onUp = (event) => keys.delete(event.code)
+  const onPointer = (event) => {
+    if (!isPlaying() || event.button !== 0) return
+    const rect = canvas.getBoundingClientRect()
+    const hit = scene.pick(event.clientX - rect.left, event.clientY - rect.top, (mesh) => mesh.metadata?.ground)
+    if (hit?.hit) destination = { x: hit.pickedPoint.x, z: hit.pickedPoint.z }
+  }
+  window.addEventListener('keydown', onDown)
+  window.addEventListener('keyup', onUp)
+  window.addEventListener('blur', clear)
+  canvas.addEventListener('pointerdown', onPointer)
+  return {
+    clear,
+    direction(position) {
+      const horizontal = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft'))
+      const vertical = Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown'))
+      if (horizontal || vertical) {
+        const x = horizontal - vertical, z = horizontal + vertical
+        const length = Math.hypot(x, z)
+        return { x: x / length, z: z / length }
+      }
+      if (destination) {
+        const x = destination.x - position.x, z = destination.z - position.z
+        const length = Math.hypot(x, z)
+        if (length > 0.2) return { x: x / length, z: z / length, distance: length }
+        destination = null
+      }
+      return { x: 0, z: 0 }
+    },
+    dispose() {
+      clear()
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', clear)
+      canvas.removeEventListener('pointerdown', onPointer)
+    },
+  }
+}
