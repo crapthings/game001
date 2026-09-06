@@ -1,5 +1,6 @@
 import '@babylonjs/core/Culling/ray'
 
+const sprintKeys = new Set(['ShiftLeft', 'ShiftRight'])
 const controls = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
 
 export function createMovementInput(canvas, scene, isPlaying) {
@@ -7,10 +8,10 @@ export function createMovementInput(canvas, scene, isPlaying) {
   let destination = null
   const clear = () => { keys.clear(); destination = null }
   const onDown = (event) => {
-    if (!isPlaying() || !controls.has(event.code) || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName)) return
+    if (!isPlaying() || (!controls.has(event.code) && !sprintKeys.has(event.code)) || event.ctrlKey || event.metaKey || event.altKey || event.target?.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName)) return
     event.preventDefault()
     keys.add(event.code)
-    destination = null
+    if (controls.has(event.code)) destination = null
   }
   const onUp = (event) => keys.delete(event.code)
   const onPointer = (event) => {
@@ -25,6 +26,7 @@ export function createMovementInput(canvas, scene, isPlaying) {
   canvas.addEventListener('pointerdown', onPointer)
   return {
     clear,
+    wantsSprint: () => keys.has('ShiftLeft') || keys.has('ShiftRight'),
     direction(position) {
       const horizontal = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft'))
       const vertical = Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown'))

@@ -5,6 +5,10 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { getBuildingDefinition } from './buildings/catalog.js'
 import { createBuildingModel } from './buildings/createBuildingModel.js'
+import { getVillageBuildingDefinition } from './village/catalog.js'
+import { createVillageBuildingModel } from './village/createVillageBuildingModel.js'
+import { environmentCatalog } from './environment/catalog.js'
+import { createEnvironmentModel } from './environment/createEnvironmentModel.js'
 
 // 外观仅由 assetId 解析。未来替换工厂或 glTF 模型，不改变布局、对象 ID、进度。
 export function createAssetRegistry(scene) {
@@ -23,8 +27,13 @@ export function createAssetRegistry(scene) {
     if (templates.has(assetId)) return templates.get(assetId)
     let mesh
     const building = getBuildingDefinition(assetId)
-    if (building) {
+    const village = getVillageBuildingDefinition(assetId)
+    if (village) {
+      mesh = createVillageBuildingModel(scene, village, material)
+    } else if (building) {
       mesh = createBuildingModel(scene, building, material)
+    } else if (environmentCatalog[assetId]) {
+      mesh = createEnvironmentModel(scene, assetId, environmentCatalog[assetId], material)
     } else if (assetId === 'nature.tree') {
       const trunk = MeshBuilder.CreateCylinder('trunk', { height: 3, diameter: 0.6, tessellation: 5 }, scene)
       trunk.position.y = 1.5
@@ -54,6 +63,7 @@ export function createAssetRegistry(scene) {
     return mesh
   }
   return {
+    prepare: (assetId) => template(assetId),
     create(placement, parent, regionId) {
       const instance = template(placement.assetId).createInstance(placement.id)
       instance.isVisible = true

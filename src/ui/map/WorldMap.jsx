@@ -17,7 +17,7 @@ export default function WorldMap() {
   const dialogRef = useRef(null)
   useEffect(() => { closeRef.current?.focus() }, [])
   if (!plan) return null
-  const zoom = (factor) => setSpan((value) => Math.min(768, Math.max(64, value * factor)))
+  const zoom = (factor) => setSpan((value) => Math.min(2304, Math.max(64, value * factor)))
   const endDrag = (event) => {
     drag.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
@@ -36,7 +36,7 @@ export default function WorldMap() {
     <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="world-map-title" onKeyDown={onKeyDown} className="absolute inset-0 z-20 flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm sm:p-8">
       <div className="flex h-full max-h-[860px] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-stone-500/30 bg-[#101716] shadow-2xl">
         <header className="flex items-center justify-between gap-3 border-b border-stone-500/20 px-4 py-3 sm:px-6">
-          <div><p className="text-[10px] tracking-[0.25em] text-emerald-300/70">SURVIVOR NAVIGATION</p><h1 id="world-map-title" className="mt-1 text-lg font-semibold text-stone-100">探索地图</h1></div>
+          <div><p className="text-[10px] tracking-[0.25em] text-emerald-300/70">SURVIVOR NAVIGATION</p><h1 id="world-map-title" className="mt-1 text-lg font-semibold text-stone-100">探索地图 · 2048 × 2048 m</h1></div>
           <button ref={closeRef} type="button" onClick={closeMap} className={buttonClass}>关闭 · M / Esc</button>
         </header>
         <div className="relative min-h-0 flex-1 cursor-grab active:cursor-grabbing">
@@ -52,7 +52,8 @@ export default function WorldMap() {
               const unitsPerPixel = span / Math.min(rect.width, rect.height)
               setCenter({ x: drag.current.center.x - (event.clientX - drag.current.x) * unitsPerPixel, z: drag.current.center.z + (event.clientY - drag.current.y) * unitsPerPixel })
             }} onPointerUp={endDrag} onWheel={(event) => { drag.current = null; zoom(event.deltaY > 0 ? 1.15 : 1 / 1.15) }} />
-          <div className="absolute bottom-3 right-3 flex gap-2">
+          <div className="absolute bottom-3 right-3 flex flex-wrap justify-end gap-2">
+            <button type="button" className={buttonClass} onClick={() => { setCenter({ x: 0, z: 0 }); setSpan(2304) }}>全域</button>
             <button type="button" className={buttonClass} aria-label="放大地图" onClick={() => zoom(0.75)}>＋</button>
             <button type="button" className={buttonClass} aria-label="缩小地图" onClick={() => zoom(1 / 0.75)}>－</button>
             <button type="button" className={buttonClass} onClick={() => setCenter({ x: navigation.position.x, z: navigation.position.z })}>定位自己</button>

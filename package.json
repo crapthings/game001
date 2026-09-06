@@ -17,6 +17,7 @@
     "@babylonjs/core": "9.25.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-router-dom": "7.18.3",
     "zustand": "5.0.15"
   },
   "devDependencies": {

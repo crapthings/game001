@@ -2,6 +2,7 @@ import { useGameStore } from '../../stores/useGameStore.js'
 import { useWorldStore } from '../../stores/useWorldStore.js'
 import { useNavigationStore } from '../../stores/useNavigationStore.js'
 import MapCanvas from './MapCanvas.jsx'
+import { regionAt } from '../../game/world/biomes/sampleEcology.js'
 
 export default function RadarHud() {
   const navigation = useNavigationStore()
@@ -14,6 +15,7 @@ export default function RadarHud() {
       <button type="button" onClick={openMap} title="打开地图（M）" className="block aspect-square w-full overflow-hidden rounded-full focus-visible:outline-2 focus-visible:outline-emerald-300" aria-label="打开地图（M）">
         <MapCanvas center={{ x: position.x, z: position.z }} span={112} navigation={navigation} plan={plan} radar />
       </button>
+      <p className="mt-2 truncate text-center text-[11px] text-stone-300">{regionAt(plan, position.x, position.z)?.name || '世界边界'}</p>
       <div className="mt-2 flex justify-between font-mono text-[11px] tabular-nums text-emerald-100/90">
         <span>X {position.x.toFixed(1)}</span><span>Z {position.z.toFixed(1)}</span>
       </div>

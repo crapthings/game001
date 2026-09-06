@@ -1,85 +1,93 @@
 import { createRandom } from './random.js'
-import { regionDefinitions } from '../regions/definitions.js'
-import { createTownPlan } from '../settlements/createTownPlan.js'
+import { WORLD_BOUNDS, WORLD_SIZE, WORLD_UNIT, insideRegion } from '../worldConfig.js'
+import { biomeCatalog } from '../biomes/catalog.js'
+import { createRegionalRoadPlan } from '../roads/createRegionalRoadPlan.js'
+import { compileRoadNetwork } from '../roads/roadGeometry.js'
+import { blocksRoad } from '../settlements/frontage.js'
+import { environmentCatalog } from '../../assets/environment/catalog.js'
+import { createRegionalSettlement } from '../settlements/createRegionalSettlement.js'
+export { normalizeSeed, validateDefinitions } from './generateWorldV1.js'
+import { normalizeSeed } from './generateWorldV1.js'
 
-export const GENERATOR_VERSION = 1
-export const PLAN_VERSION = 1
-
-export function normalizeSeed(seed) {
-  const normalized = String(seed).normalize('NFC').trim()
-  if (!normalized || normalized.length > 80) throw new Error('世界种子需为 1–80 个字符。')
-  return normalized
+export const GENERATOR_VERSION = 2
+export const PLAN_VERSION = 2
+function shuffled(values, random) {
+  const result = [...values]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1)), current = result[index]
+    result[index] = result[other]; result[other] = current
+  }
+  return result
 }
+const colorHex = (color) => '#' + color.map((value) => Math.round(value * 255).toString(16).padStart(2, '0')).join('')
 
-export function validateDefinitions(definitions) {
-  const ids = new Set()
-  for (const region of definitions) {
-    if (!/^[a-z0-9-]+$/.test(region.id) || ids.has(region.id)) throw new Error('区域 ID 不合法或重复。')
-    ids.add(region.id)
-    if (!Number.isInteger(region.revision) || region.revision < 1 || !Array.isArray(region.center) || region.center.length !== 2 || !region.center.every(Number.isFinite) || !Number.isFinite(region.radius) || region.radius < 10) throw new Error(`区域 ${region.id} 的范围无效。`)
-    const localIds = new Set()
-    for (const item of [...region.landmarks, ...region.scatter]) {
-      if (!/^[a-z0-9-]+$/.test(item.id) || localIds.has(item.id) || !item.assetId) throw new Error(`区域 ${region.id} 的内容 ID 无效。`)
-      localIds.add(item.id)
-    }
-    for (const item of region.landmarks) {
-      if (!Array.isArray(item.offset) || item.offset.length !== 2 || !item.offset.every(Number.isFinite) || Math.hypot(...item.offset) > region.radius - 5) throw new Error(`区域 ${region.id} 的地标超出预留范围。`)
-    }
-    for (const item of region.scatter) {
-      if (!Number.isInteger(item.count) || item.count < 0 || item.count > 500) throw new Error(`区域 ${region.id} 的散布数量无效。`)
-    }
-  }
-  for (const region of definitions) {
-    if (region.connections.some((id) => !ids.has(id) || id === region.id)) throw new Error(`区域 ${region.id} 的连接无效。`)
-  }
-  for (let a = 0; a < definitions.length; a += 1) {
-    for (let b = a + 1; b < definitions.length; b += 1) {
-      const first = definitions[a], second = definitions[b]
-      if (Math.hypot(first.center[0] - second.center[0], first.center[1] - second.center[1]) < first.radius + second.radius) throw new Error(`区域 ${first.id} 与 ${second.id} 重叠。`)
-    }
-  }
-}
-
-export function generateWorld(seed, definitions = regionDefinitions) {
+export function generateWorld(seed) {
   seed = normalizeSeed(seed)
-  validateDefinitions(definitions)
-  const regions = [...definitions].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((definition) => {
-    const region = structuredClone(definition)
-    const placements = region.landmarks.map((item) => ({
-      id: `${region.id}/landmark/${item.id}`, assetId: item.assetId,
-      position: [region.center[0] + item.offset[0], 0, region.center[1] + item.offset[1]],
-      rotation: 0, scale: 1, label: item.label,
-    }))
-    for (const layer of region.scatter) {
-      for (let index = 0; index < layer.count; index += 1) {
-        // 每个对象独立随机流：新增区域、层或对象不会消耗其他对象的随机序列。
-        const random = createRandom(seed, GENERATOR_VERSION, region.id, region.revision, layer.id, index)
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          const angle = random() * Math.PI * 2
-          const radius = Math.sqrt(random()) * (region.radius - 3)
-          const x = Math.cos(angle) * radius, z = Math.sin(angle) * radius
-          // 中心保留通道；地标周围留白，后续正式素材可替换代理模型。
-          if (Math.abs(z) < 2.5 || region.landmarks.some((item) => Math.hypot(x - item.offset[0], z - item.offset[1]) < 6)) continue
-          const position = [region.center[0] + x, 0, region.center[1] + z]
-          if (placements.some((item) => Math.hypot(position[0] - item.position[0], position[2] - item.position[2]) < 2.5)) continue
-          placements.push({ id: `${region.id}/${layer.id}/${index}`, assetId: layer.assetId, position, rotation: random() * Math.PI * 2, scale: 0.8 + random() * 0.4 })
-          break
-        }
-      }
+  const random = createRandom(seed, 'world-layout-v2')
+  const cuts = () => [-1024, -512 + Math.round((random() - 0.5) * 112), Math.round((random() - 0.5) * 112), 512 + Math.round((random() - 0.5) * 112), 1024]
+  const xs = cuts(), zs = cuts()
+  const roles = shuffled(['city', 'city', 'city', 'village', 'village', 'village', 'village', 'woodland', 'woodland', 'meadow', 'farmland', 'farmland', 'wetland', 'wetland', 'quarry', 'scrubland'], random)
+  const spawnColumn = xs.findIndex((value, index) => index < 4 && value <= 0 && xs[index + 1] > 0)
+  const spawnRow = zs.findIndex((value, index) => index < 4 && value <= 0 && zs[index + 1] > 0)
+  const spawnIndex = spawnRow * 4 + spawnColumn
+  const villageIndex = roles.indexOf('village')
+  const spawnRole = roles[spawnIndex]
+  roles[spawnIndex] = roles[villageIndex]
+  roles[villageIndex] = spawnRole
+  const regions = []
+  let cityCount = 0, villageCount = 0
+  for (let row = 0; row < 4; row += 1) {
+    for (let column = 0; column < 4; column += 1) {
+      const index = row * 4 + column, role = roles[index]
+      const id = `district-${row}-${column}`
+      const rng = createRandom(seed, id, 'region-v2')
+      const bounds = { minX: xs[column], maxX: xs[column + 1], minZ: zs[row], maxZ: zs[row + 1] }
+      const center = [Math.round((bounds.minX + bounds.maxX) / 2), Math.round((bounds.minZ + bounds.maxZ) / 2)]
+      const biome = role === 'city' ? 'urban' : role === 'village' ? 'farmland' : role
+      const kind = role === 'city' || role === 'village' ? role : 'wilderness'
+      const name = role === 'city' ? ['灰港城区', '旧工业城', '北岸新城'][cityCount++] : role === 'village' ? ['灰桥村', '松田村', '风车村', '石井村'][villageCount++] : `${biomeCatalog[biome].name} ${row + 1}-${column + 1}`
+      const patchPool = biome === 'urban' ? ['scrubland', 'woodland', 'meadow'] : biome === 'farmland' ? ['meadow', 'woodland', 'wetland'] : ['woodland', 'scrubland', 'meadow', 'wetland']
+      const ecology = Array.from({ length: 3 }, (_, patch) => ({
+        id: `${id}/ecology/${patch}`, biome: patchPool[Math.floor(rng() * patchPool.length)],
+        center: [Math.round(bounds.minX + (0.2 + rng() * 0.6) * (bounds.maxX - bounds.minX)), Math.round(bounds.minZ + (0.2 + rng() * 0.6) * (bounds.maxZ - bounds.minZ))],
+        radius: 65 + Math.round(rng() * 45),
+      }))
+      regions.push({ id, revision: 1, kind, name, biome, center, bounds, radius: Math.min(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2, ecology, color: colorHex(biomeCatalog[biome].color), description: `${name}，含${ecology.map((patch) => biomeCatalog[patch.biome].name).join('、')}过渡生态。`, tags: [kind, biome], connections: [], landmarks: [], scatter: [], placements: [] })
     }
-    return { ...region, placements }
+  }
+  // 共享边界形成区域邻接图，避免独立随机圆形区域留下空隙。
+  regions.forEach((region, index) => {
+    const row = Math.floor(index / 4), column = index % 4
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (column + dx >= 0 && column + dx < 4 && row + dz >= 0 && row + dz < 4) region.connections.push(`district-${row + dz}-${column + dx}`)
+    }
   })
-  return { seed, generatorVersion: GENERATOR_VERSION, planVersion: PLAN_VERSION, regions, settlements: [createTownPlan(seed)] }
+  const citySizes = shuffled(['small', 'medium', 'large'], createRandom(seed, 'city-sizes-v3'))
+  regions.filter(region => region.kind === 'city').forEach((region, index) => {
+    region.citySize = citySizes[index]
+    region.tags.push(region.citySize)
+  })
+  const settlements = regions.filter((region) => region.kind !== 'wilderness').map((region) => createRegionalSettlement(seed, region))
+  const roads = createRegionalRoadPlan(settlements)
+  const regionalSegments = compileRoadNetwork(roads)
+  for (const town of settlements) {
+    // 跨区公路优先，地块和组合装饰避让走廊；不让道路穿过建筑。
+    town.placements = town.placements.filter(placement => !blocksRoad(placement,regionalSegments,1))
+    const owners = new Set(town.placements.map(item=>item.id))
+    if(town.surfaces) town.surfaces=town.surfaces.filter(surface=>!surface.ownerId || owners.has(surface.ownerId))
+    const allSegments=compileRoadNetwork([...roads,...town.roads])
+    town.decorations = town.decorations.filter(placement => {
+      if(placement.ownerId && !owners.has(placement.ownerId)) return false
+      const definition=environmentCatalog[placement.assetId]
+      const footprint=definition?.footprint || {width:(definition?.radius || 1)*2,depth:(definition?.radius || 1)*2}
+      return !blocksRoad({...placement,footprint},allSegments,0.5)
+    })
+  }
+  const startRegion = regions.find((region) => insideRegion(region, 0, 0))
+  const spawnTown = settlements.find((town) => town.regionId === startRegion.id)
+  return { seed, generatorVersion: GENERATOR_VERSION, planVersion: PLAN_VERSION, unitSize: WORLD_UNIT, size: WORLD_SIZE, bounds: { ...WORLD_BOUNDS }, terrainVersion: 2, environmentVersion: 1, roadPlanVersion: 3, regions, settlements, roads, spawn: [spawnTown.gate[0] + 20, spawnTown.gate[1]] }
 }
 
-// 显式扩展旧世界：仅追加未出现的区域 ID，既有区域和对象快照不重算。
-export function appendNewRegions(plan, definitions = regionDefinitions) {
-  if (plan.generatorVersion !== GENERATOR_VERSION) throw new Error('需要先迁移生成器版本。')
-  const existingIds = new Set(plan.regions.map((region) => region.id))
-  const additions = definitions.filter((region) => !existingIds.has(region.id))
-  if (additions.length === 0) return plan
-  const combined = [...plan.regions, ...additions]
-  validateDefinitions(combined)
-  const generated = generateWorld(plan.seed, combined)
-  return { ...plan, regions: [...plan.regions, ...generated.regions.filter((region) => !existingIds.has(region.id))] }
+export function appendNewRegions() {
+  throw new Error('2048 米世界已完整分区。调整规划配方后请创建新版本世界，不直接覆盖既有区域。')
 }

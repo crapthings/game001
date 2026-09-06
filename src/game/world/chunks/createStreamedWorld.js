@@ -4,28 +4,42 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { createAssetRegistry } from '../../assets/createAssetRegistry.js'
+import { environmentCatalog } from '../../assets/environment/catalog.js'
+import { biomeCatalog } from '../biomes/catalog.js'
+import { HUMAN_SCALE } from '../worldMetrics.js'
+import { insideWorld } from '../worldConfig.js'
 import { townSurface } from '../settlements/createTownPlan.js'
 import { createStreetSection } from '../settlements/createStreetSection.js'
-import { createRoadSurfaceCache } from '../settlements/createRoadSurfaceCache.js'
-import { createTerrain, generateChunk, chunkAt, chunkKey, requiredChunks, KEEP_RADIUS } from './terrain.js'
+import { createTerrain, chunkAt, chunkKey, requiredChunks, KEEP_RADIUS, CHUNK_SIZE } from './terrain.js'
 
 export function createStreamedWorld(scene, plan) {
   const towns = plan.settlements || []
-  const terrain = createTerrain(plan.seed, towns)
+  const terrain = createTerrain(plan.seed, towns, plan)
   const assets = createAssetRegistry(scene)
   const loaded = new Map()
   const material = new StandardMaterial('terrain-material', scene)
   material.diffuseColor = Color3.White()
   material.specularColor = Color3.Black()
-  const roadSurfaces = createRoadSurfaceCache(scene, plan.seed)
-  const streetMaterials = {}
-  for (const [name, color] of Object.entries({ rubble: '#7c7766', weeds: '#646e43' })) {
-    const entry = new StandardMaterial(`street:${name}`, scene)
-    entry.diffuseColor = Color3.FromHexString(color)
-    entry.specularColor = Color3.Black()
-    streetMaterials[name] = entry
+  const worker = new Worker(new URL('./chunk.worker.js', import.meta.url), { type: 'module' })
+  let center = null, queue = [], wanted = new Map(), required = [], pending = null, prepared = null, assembling = null
+  let disposed = false, failure = null, previousPosition = null
+  let direction = { x: 0, z: 0 }
+  const retired = []
+  const warmup = [...new Set([
+    ...Object.values(biomeCatalog).flatMap((biome) => biome.assets.map(([id]) => id)),
+    ...towns.flatMap((town) => [...town.placements, ...(town.decorations || [])].map((item) => item.assetId)),
+    ...plan.regions.flatMap((region) => region.placements.map((item) => item.assetId)),
+  ])].filter((id) => !id.startsWith('landmark.'))
+  const templateCount = warmup.length
+  worker.onmessage = ({ data: message }) => {
+    if (disposed) return
+    pending = null
+    if (message.type === 'error') { failure = new Error(message.message); return }
+    if (wanted.has(message.data.key)) prepared = message.data
   }
-  let center = null, queue = []
+  worker.onerror = (event) => { event.preventDefault(); failure = new Error(event.message || '世界生成线程启动失败') }
+  worker.onmessageerror = () => { failure = new Error('无法读取世界生成线程结果') }
+  worker.postMessage({ type: 'init', plan })
   // 区域仅是语义和地标覆盖，不再绘制孤立的圆形区域底座。
   const overrides = new Map()
   for (const region of plan.regions) {
@@ -33,7 +47,7 @@ export function createStreamedWorld(scene, plan) {
       const chunk = chunkAt(placement.position[0], placement.position[2])
       const key = chunkKey(chunk.x, chunk.z)
       if (!overrides.has(key)) overrides.set(key, [])
-      overrides.get(key).push({ ...placement, regionId: region.id })
+      overrides.get(key).push({ ...placement, regionId: region.id, planned: true })
     }
   }
   for (const town of towns) {
@@ -44,90 +58,138 @@ export function createStreamedWorld(scene, plan) {
       overrides.get(key).push({ ...placement, regionId: town.id, building: true })
     }
   }
-  function load(chunk) {
-    if (loaded.has(chunk.key)) return
-    const data = generateChunk(terrain, chunk.x, chunk.z)
-    const root = new TransformNode(`chunk:${chunk.key}`, scene)
+  for (const town of towns) {
+    for (const placement of town.decorations || []) {
+      const chunk = chunkAt(placement.position[0], placement.position[2])
+      const key = chunkKey(chunk.x, chunk.z)
+      if (!overrides.has(key)) overrides.set(key, [])
+      overrides.get(key).push({ ...placement, regionId: town.regionId, decoration: true })
+    }
+  }
+  function* build(chunk, data, root) {
     const mesh = new Mesh(`ground:${chunk.key}`, scene)
     mesh.parent = root
     const vertices = new VertexData()
     vertices.positions = data.positions
     vertices.indices = data.indices
     vertices.colors = data.colors
-    const normals = []
-    // 全局高度梯度计算法线，使相邻区块接缝光照一致。
-    for (let index = 0; index < data.positions.length; index += 3) {
-      const x = data.positions[index], z = data.positions[index + 2]
-      const nx = terrain.height(x - 0.1, z) - terrain.height(x + 0.1, z)
-      const nz = terrain.height(x, z - 0.1) - terrain.height(x, z + 0.1)
-      const length = Math.hypot(nx, 0.2, nz)
-      normals.push(nx / length, 0.2 / length, nz / length)
-    }
-    vertices.normals = normals
+    vertices.normals = data.normals
     vertices.applyToMesh(mesh)
     mesh.material = material
     mesh.receiveShadows = true
     mesh.metadata = { ground: true, chunkKey: chunk.key }
-    createStreetSection(scene, root, chunk, towns, roadSurfaces, streetMaterials, plan.seed)
-    const planned = overrides.get(chunk.key) || []
-    const natural = data.placements.filter((placement) => !plan.regions.some((region) => Math.hypot(placement.position[0] - region.center[0], placement.position[2] - region.center[1]) < region.radius))
+    yield
+    createStreetSection(scene, root, chunk, data, plan.seed)
+    yield
     const colliders = []
-    for (const placement of [...natural, ...planned]) {
+    for (const placement of data.placements) {
+      if (!placement.planned && !placement.building && !placement.decoration && plan.regions.some((region) => region.placements.length > 0 && Math.hypot(placement.position[0] - region.center[0], placement.position[2] - region.center[1]) < region.radius)) continue
       const x = placement.position[0], z = placement.position[2]
       // 不占用出生点；地标代理留待真实交互素材接入。
-      if (Math.hypot(x, z) < 5 || placement.assetId.startsWith('landmark.')) continue
-      if (!placement.building && townSurface(towns, x, z)?.weight > 0.5) continue
-      assets.create({ ...placement, position: [x, terrain.surfaceHeight(x, z), z] }, root, placement.regionId)
-      if (placement.building) {
-        colliders.push({ x, z, rotation: placement.rotation, halfWidth: placement.footprint.width * placement.scale / 2, halfDepth: placement.footprint.depth * placement.scale / 2 })
+      const spawn = plan.spawn || [0, 0]
+      if (Math.hypot(x - spawn[0], z - spawn[1]) < 3 || placement.assetId.startsWith('landmark.')) continue
+      if (!placement.building && !placement.decoration && townSurface(towns, x, z)?.weight > 0.5) continue
+      assets.create(placement, root, placement.regionId)
+      const definition = environmentCatalog[placement.assetId]
+      const footprint = placement.footprint || definition?.footprint
+      if (footprint) {
+        colliders.push({ x, z, rotation: placement.rotation, halfWidth: footprint.width * placement.scale / 2, halfDepth: footprint.depth * placement.scale / 2 })
       } else {
-        colliders.push({ x, z, radius: (placement.assetId === 'nature.tree' ? 0.45 : 0.9) * placement.scale })
+        const radius = definition?.radius ?? (placement.assetId === 'nature.tree' ? 0.45 : 0.9)
+        if (radius > 0) colliders.push({ x, z, radius: radius * placement.scale })
       }
+      yield
     }
+    root.setEnabled(true)
     loaded.set(chunk.key, { root, colliders })
   }
-  function update(x, z, budget = 2) {
+  function update(x, z, budgetMs = 3) {
+    if (failure) throw failure
+    const started = performance.now()
     const next = chunkAt(x, z)
-    if (!center || center.x !== next.x || center.z !== next.z) {
-      center = next
-      queue = requiredChunks(center).filter((chunk) => !loaded.has(chunk.key))
-      for (const [key, entry] of loaded) {
-        const [cx, cz] = key.split(',').map(Number)
-        if (Math.abs(cx - center.x) > KEEP_RADIUS || Math.abs(cz - center.z) > KEEP_RADIUS) {
-          entry.root.dispose()
-          loaded.delete(key)
-        }
+    if (previousPosition) {
+      const dx = x - previousPosition.x, dz = z - previousPosition.z, length = Math.hypot(dx, dz)
+      if (length > 0.001) direction = { x: dx / length, z: dz / length }
+    }
+    previousPosition = { x, z }
+    center = next
+    const ahead = chunkAt(x + direction.x * 24, z + direction.z * 24)
+    const inBounds = (chunk) => insideWorld(plan.bounds, (chunk.x + 0.5) * CHUNK_SIZE, (chunk.z + 0.5) * CHUNK_SIZE)
+    required = requiredChunks(center).filter(inBounds)
+    wanted = new Map(required.map((chunk) => [chunk.key, chunk]))
+    // 当前近邻优先，前方 24m 的预测窗口提前计算下一排区块。
+    for (const chunk of requiredChunks(ahead).filter(inBounds)) {
+      if (!wanted.has(chunk.key)) wanted.set(chunk.key, chunk)
+    }
+    queue = [...wanted.values()].filter((chunk) => !loaded.has(chunk.key) && chunk.key !== pending?.key && chunk.key !== prepared?.key && chunk.key !== assembling?.key)
+    if (prepared && !wanted.has(prepared.key)) prepared = null
+    if (assembling && !wanted.has(assembling.key)) {
+      assembling.iterator.return()
+      retired.push(assembling.root)
+      assembling = null
+    }
+    for (const [key, entry] of loaded) {
+      const [cx, cz] = key.split(',').map(Number)
+      if (Math.abs(cx - center.x) > KEEP_RADIUS || Math.abs(cz - center.z) > KEEP_RADIUS) {
+        entry.root.setEnabled(false)
+        retired.push(entry.root)
+        loaded.delete(key)
       }
     }
-    for (let index = 0; index < budget && queue.length; index += 1) load(queue.shift())
+    // 最多一个计算任务和一个待安装结果，防止 Worker 消息与 GPU 上传堆积。
+    if (!pending && !prepared && queue.length) {
+      pending = queue.shift()
+      worker.postMessage({ type: 'generate', chunk: pending, placements: overrides.get(pending.key) || [] })
+    }
+    if (!assembling && prepared) {
+      const data = prepared
+      prepared = null
+      const root = new TransformNode(`chunk:${data.key}`, scene)
+      root.setEnabled(false)
+      assembling = { key: data.key, root, iterator: build(data, data, root) }
+    }
+    // 首次加载逐帧预热世界会用到的模板，避免进入新街区才首次合并建筑模型。
+    if (warmup.length && performance.now() - started < budgetMs) assets.prepare(warmup.shift())
+    // 每一步仅做地面、道路上传或一个资产实例；预算是软上限，单个 GPU 操作不可中断。
+    let steps = 0
+    while (assembling && performance.now() - started < budgetMs && steps < 8) {
+      steps += 1
+      if (assembling.iterator.next().done) assembling = null
+    }
+    if (retired.length && performance.now() - started < budgetMs) retired.shift().dispose()
   }
   return {
     terrain,
     update,
-    getStats: () => ({ loaded: loaded.size, queued: queue.length, center }),
+    getStats: () => ({ loaded: loaded.size, queued: required.filter((chunk) => !loaded.has(chunk.key)).length, required: required.length, ready: required.filter((chunk) => loaded.has(chunk.key)).length, templatesReady: templateCount - warmup.length, templatesTotal: templateCount, pending: Boolean(pending), assembling: Boolean(assembling), center }),
     // 所有导航与移动共用这层检查，不依赖美术模型的三角面。
     canMove(x, z) {
+      if (!insideWorld(plan.bounds, x, z, 1)) return false
       const at = chunkAt(x, z)
       if (!loaded.has(chunkKey(at.x, at.z))) return false
       for (const entry of loaded.values()) {
         if (entry.colliders.some((obstacle) => {
           const dx = x - obstacle.x, dz = z - obstacle.z
-          if (obstacle.radius !== undefined) return Math.hypot(dx, dz) < obstacle.radius + 0.4
+          if (obstacle.radius !== undefined) return Math.hypot(dx, dz) < obstacle.radius + HUMAN_SCALE.collisionRadius
           const cosine = Math.cos(obstacle.rotation), sine = Math.sin(obstacle.rotation)
           const localX = dx * cosine - dz * sine, localZ = dx * sine + dz * cosine
-          return Math.abs(localX) < obstacle.halfWidth + 0.4 && Math.abs(localZ) < obstacle.halfDepth + 0.4
+          return Math.abs(localX) < obstacle.halfWidth + HUMAN_SCALE.collisionRadius && Math.abs(localZ) < obstacle.halfDepth + HUMAN_SCALE.collisionRadius
         })) return false
       }
       return true
     },
     dispose() {
+      disposed = true
+      worker.terminate()
+      assembling?.iterator.return()
+      assembling?.root.dispose()
+      for (const root of retired) root.dispose()
+      prepared = null
       queue = []
       for (const entry of loaded.values()) entry.root.dispose()
       loaded.clear()
       assets.dispose()
       material.dispose()
-      roadSurfaces.dispose()
-      Object.values(streetMaterials).forEach((entry) => entry.dispose())
     },
   }
 }

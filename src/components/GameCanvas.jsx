@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Engine } from '@babylonjs/core/Engines/engine'
 import { createWorldScene } from '../game/scenes/createWorldScene.js'
 
-export default function GameCanvas() {
+export default function GameCanvas({ onLoading, onReady, onError }) {
   const canvasRef = useRef(null)
   const [error, setError] = useState(null)
 
@@ -12,15 +12,27 @@ export default function GameCanvas() {
 
     try {
       const canvas = canvasRef.current
+      onLoading?.({ progress: 32, label: '正在启动图形引擎' })
       engine = new Engine(canvas, true)
       engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 2))
-      const scene = createWorldScene(engine, canvas)
-      engine.runRenderLoop(() => scene.render())
+      onLoading?.({ progress: 42, label: '正在创建世界场景' })
+      const scene = createWorldScene(engine, canvas, { onLoading, onReady })
+      engine.runRenderLoop(() => {
+        try { scene.render() }
+        catch (cause) {
+          engine.stopRenderLoop()
+          const message = `世界加载失败：${cause.message || '未知错误'}`
+          setError(message)
+          onError?.(message)
+        }
+      })
       resizeObserver = new ResizeObserver(() => engine.resize())
       resizeObserver.observe(canvas)
     } catch (cause) {
       console.error('Unable to initialize Babylon scene:', cause)
-      setError('3D 场景启动失败，请使用支持 WebGL 的浏览器并开启硬件加速。')
+      const message = '3D 场景启动失败，请使用支持 WebGL 的浏览器并开启硬件加速。'
+      setError(message)
+      onError?.(message)
       resizeObserver?.disconnect()
       engine?.dispose()
       return

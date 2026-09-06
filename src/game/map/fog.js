@@ -12,10 +12,11 @@ export function isExplored(fog, x, z) {
   const { key, bit } = fogAddress(Math.floor(x / FOG_CELL_SIZE), Math.floor(z / FOG_CELL_SIZE))
   return Boolean((fog[key] || 0) & bit)
 }
-export function revealFog(fog, x, z) {
+export function revealFog(fog, x, z, bounds) {
   let next = fog
   for (let cz = Math.floor((z - REVEAL_RADIUS) / FOG_CELL_SIZE); cz <= Math.floor((z + REVEAL_RADIUS) / FOG_CELL_SIZE); cz += 1) {
     for (let cx = Math.floor((x - REVEAL_RADIUS) / FOG_CELL_SIZE); cx <= Math.floor((x + REVEAL_RADIUS) / FOG_CELL_SIZE); cx += 1) {
+      if (bounds && ((cx + 0.5) * FOG_CELL_SIZE < bounds.minX || (cx + 0.5) * FOG_CELL_SIZE >= bounds.maxX || (cz + 0.5) * FOG_CELL_SIZE < bounds.minZ || (cz + 0.5) * FOG_CELL_SIZE >= bounds.maxZ)) continue
       if (Math.hypot((cx + 0.5) * FOG_CELL_SIZE - x, (cz + 0.5) * FOG_CELL_SIZE - z) > REVEAL_RADIUS) continue
       const { key, bit } = fogAddress(cx, cz)
       if (((next[key] || 0) & bit) !== 0) continue

@@ -2,12 +2,14 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
+import { HUMAN_SCALE } from '../world/worldMetrics.js'
 
 // 现代末日幸存者代理：面向 +Z、脚底原点；保持原有移动和碰撞接口。
 export function createPlayer(scene) {
   const root = new TransformNode('player', scene)
   const rig = new TransformNode('survivor-rig', scene)
   rig.parent = root
+  rig.scaling.setAll(HUMAN_SCALE.playerModelScale)
   const materials = []
   function material(name, color) {
     const mat = new StandardMaterial(name, scene)
@@ -108,7 +110,7 @@ export function createPlayer(scene) {
     return shoulder
   })
 
-  const shadow = MeshBuilder.CreateDisc('player-contact-shadow', { radius: 0.65, tessellation: 24 }, scene)
+  const shadow = MeshBuilder.CreateDisc('player-contact-shadow', { radius: 0.48, tessellation: 24 }, scene)
   shadow.rotation.x = Math.PI / 2
   shadow.material = material('contact-shadow', '#0c1514')
   shadow.material.alpha = 0.35
@@ -117,23 +119,23 @@ export function createPlayer(scene) {
   let time = 0, gait = 0, stride = 0
   return {
     root,
-    update(dt, moving, height) {
+    update(dt, moving, height, running = false) {
       time += dt
       stride += ((moving ? 1 : 0) - stride) * Math.min(1, dt * 14)
-      if (moving) gait += dt * 12
+      if (moving) gait += dt * (running ? 18 : 12)
       root.position.y = height
       rig.position.y = Math.sin(gait * 2) * 0.018 * stride
-      rig.rotation.x = 0.045 * stride
+      rig.rotation.x = (running ? 0.16 : 0.045) * stride
       backpack.rotation.x = Math.sin(gait + 0.4) * 0.035 * stride
       for (let index = 0; index < 2; index += 1) {
         const swing = Math.sin(gait + index * Math.PI)
-        legs[index].hip.rotation.x = swing * 0.42 * stride
+        legs[index].hip.rotation.x = swing * (running ? 0.65 : 0.42) * stride
         legs[index].knee.rotation.x = Math.max(0, -swing) * 0.38 * stride
-        arms[index].rotation.x = -swing * 0.32 * stride - 0.06
+        arms[index].rotation.x = -swing * (running ? 0.55 : 0.32) * stride - 0.06
       }
       // 静止时仅轻微呼吸，不改变根节点坐标或存档位置。
       const breathing = Math.sin(time * 2) * 0.002 * (1 - stride)
-      rig.scaling.y = 1 + breathing
+      rig.scaling.y = HUMAN_SCALE.playerModelScale * (1 + breathing)
       shadow.position.set(root.position.x, height + 0.035, root.position.z)
     },
     dispose() {

@@ -1,6 +1,7 @@
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { createRandom } from '../../world/generation/random.js'
+import { HUMAN_SCALE } from '../../world/worldMetrics.js'
 
 // 所有部件先按材质合并，再合为共享模板；运行时通过 createInstance 复用。
 export function createBuildingModel(scene, definition, material) {
@@ -97,10 +98,10 @@ export function createBuildingModel(scene, definition, material) {
     box('base-course', w + 0.08, 0.6, d + 0.08, 0, slab + 0.3, 0, concrete)
     windows(w, d, height)
     const front = d / 2
-    box('door-frame', 1.65, 2.6, 0.17, 0, slab + 1.3, front + 0.06, trim)
-    box('door', 1.35, 2.35, 0.2, 0, slab + 1.18, front + 0.14, dark)
+    box('door-frame', HUMAN_SCALE.doorWidth + 0.24, HUMAN_SCALE.doorHeight + 0.24, 0.17, 0, slab + (HUMAN_SCALE.doorHeight + 0.24) / 2, front + 0.06, trim)
+    box('door', HUMAN_SCALE.doorWidth, HUMAN_SCALE.doorHeight, 0.2, 0, slab + HUMAN_SCALE.doorHeight / 2, front + 0.14, dark)
     box('door-handle', 0.07, 0.38, 0.25, 0.42, 1.35, front + 0.25, metal)
-    box('step', 2.3, 0.2, 0.7, 0, 0.1, front + 0.5, concrete)
+    box('step', 1.5, 0.2, 0.7, 0, 0.1, front + 0.5, concrete)
     if (definition.roof === 'gable') pitchedRoof(slab + height)
     else flatRoof(w, d, slab + height)
     for (let floor = 1; floor < floors; floor += 1) box('floor-band', w + 0.2, 0.18, d + 0.2, 0, slab + floor * floorHeight, 0, concrete)

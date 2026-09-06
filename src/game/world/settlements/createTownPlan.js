@@ -1,5 +1,6 @@
 import { buildingCatalog, BUILDING_CATALOG_VERSION } from '../../assets/buildings/catalog.js'
 import { createRandom } from '../generation/random.js'
+import { STREET_SCALE } from '../worldMetrics.js'
 
 export const TOWN_PLAN_VERSION = 1
 
@@ -25,7 +26,7 @@ export function createTownPlan(seed) {
   return {
     id: 'town.outpost', name: '灰桥镇', revision: TOWN_PLAN_VERSION, catalogVersion: BUILDING_CATALOG_VERSION,
     bounds: { minX: -68, maxX: 68, minZ: -33, maxZ: 33 }, elevation: 0,
-    roads: [{ id: 'main-street', from: [-66, 0], to: [66, 0], width: 9 }],
+    roads: [{ id: 'main-street', from: [-66, 0], to: [66, 0], width: STREET_SCALE.cityMainRoadWidth }],
     placements,
   }
 }

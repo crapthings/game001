@@ -1,4 +1,5 @@
-import { FOG_CELL_SIZE, REVEAL_RADIUS, isExplored } from './fog.js'
+import { roadPoints } from '../world/roads/roadGeometry.js'
+import { FOG_CELL_SIZE, FOG_GROUP_SIZE, REVEAL_RADIUS, isExplored } from './fog.js'
 
 // 只读取规划与探索数据，不触发区块生成或素材加载。北方为世界 +Z。
 export function drawMap(ctx, width, height, { center, span, position, heading, fog, plan, radar }) {
@@ -10,11 +11,15 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   const xMin = center.x - width / (2 * scale), xMax = center.x + width / (2 * scale)
   const zMin = center.z - height / (2 * scale), zMax = center.z + height / (2 * scale)
   const cells = []
-  for (let z = Math.floor(zMin / FOG_CELL_SIZE); z <= Math.floor(zMax / FOG_CELL_SIZE); z += 1) {
-    for (let x = Math.floor(xMin / FOG_CELL_SIZE); x <= Math.floor(xMax / FOG_CELL_SIZE); x += 1) {
-      if (!isExplored(fog, (x + 0.5) * FOG_CELL_SIZE, (z + 0.5) * FOG_CELL_SIZE)) continue
-      const [sx, sy] = screen(x * FOG_CELL_SIZE, (z + 1) * FOG_CELL_SIZE)
-      cells.push([sx, sy])
+  // 遍历已存的探索块，而非放大到全域时遍历所有未知格。
+  for (const [key, mask] of Object.entries(fog)) {
+    const [groupX, groupZ] = key.split(',').map(Number)
+    const originX = groupX * FOG_GROUP_SIZE * FOG_CELL_SIZE, originZ = groupZ * FOG_GROUP_SIZE * FOG_CELL_SIZE
+    if (originX > xMax || originX + 32 < xMin || originZ > zMax || originZ + 32 < zMin) continue
+    for (let bit = 0; bit < 16; bit += 1) {
+      if (!(mask & (1 << bit))) continue
+      const x = originX + bit % 4 * FOG_CELL_SIZE, z = originZ + Math.floor(bit / 4) * FOG_CELL_SIZE
+      cells.push(screen(x, z + FOG_CELL_SIZE))
     }
   }
   ctx.save()
@@ -32,27 +37,35 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   for (const region of plan.regions) {
     const [x, y] = screen(...region.center)
     ctx.fillStyle = region.color
-    ctx.globalAlpha = 0.25
+    ctx.globalAlpha = 0.45
     ctx.beginPath()
-    ctx.arc(x, y, region.radius * scale, 0, Math.PI * 2)
+    if (region.bounds) {
+      const [left, top] = screen(region.bounds.minX, region.bounds.maxZ)
+      ctx.rect(left, top, (region.bounds.maxX - region.bounds.minX) * scale, (region.bounds.maxZ - region.bounds.minZ) * scale)
+    } else ctx.arc(x, y, region.radius * scale, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.globalAlpha = 1
+  const drawRoad = (road, color) => {
+    const points = roadPoints(road)
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, road.width * scale)
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round'
+    ctx.beginPath()
+    points.forEach((point, index) => index ? ctx.lineTo(...screen(...point)) : ctx.moveTo(...screen(...point)))
+    ctx.stroke()
+  }
   for (const town of plan.settlements || []) {
     const b = town.bounds
     if (b.maxX < xMin || b.minX > xMax || b.maxZ < zMin || b.minZ > zMax) continue
     const [tx, ty] = screen(b.minX, b.maxZ)
     ctx.fillStyle = '#41453b'
     ctx.fillRect(tx, ty, (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale)
-    for (const road of town.roads) {
-      const from = screen(...road.from), to = screen(...road.to)
-      ctx.strokeStyle = '#a29b75'
-      ctx.lineWidth = Math.max(1, road.width * scale)
-      ctx.beginPath()
-      ctx.moveTo(...from)
-      ctx.lineTo(...to)
-      ctx.stroke()
+    for (const block of town.blocks || []) {
+      const [bx, by] = screen(block.bounds.minX + 7, block.bounds.maxZ - 7)
+      ctx.fillStyle = { park: '#4a6543', industrial: '#695d4e', residential: '#555e51', commercial: '#696653', civic: '#59696a' }[block.kind] || '#41453b'
+      ctx.fillRect(bx, by, (block.bounds.maxX - block.bounds.minX - 14) * scale, (block.bounds.maxZ - block.bounds.minZ - 14) * scale)
     }
+    for (const road of town.roads) drawRoad(road, '#a29b75')
     for (const building of town.placements) {
       const [x, y] = screen(building.position[0], building.position[2])
       ctx.save()
@@ -67,6 +80,7 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
       ctx.restore()
     }
   }
+  for (const road of plan.roads || []) drawRoad(road, '#8d8d75')
   // 已探索但不在当前观察范围内的区域压暗；刷新后仍保留探索记忆。
   const [px, py] = screen(position.x, position.z)
   ctx.save()
@@ -125,6 +139,12 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
     ctx.fill(); ctx.stroke()
   }
   ctx.restore()
+  if (plan.bounds && !radar) {
+    const [left, top] = screen(plan.bounds.minX, plan.bounds.maxZ)
+    ctx.strokeStyle = '#849078'
+    ctx.lineWidth = 2
+    ctx.strokeRect(left, top, (plan.bounds.maxX - plan.bounds.minX) * scale, (plan.bounds.maxZ - plan.bounds.minZ) * scale)
+  }
   if (radar) {
     ctx.strokeStyle = '#708574'
     ctx.lineWidth = 1.5
