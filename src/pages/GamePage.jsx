@@ -23,7 +23,11 @@ export default function GamePage({ seed }) {
     const onKeyDown = (event) => {
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName) || event.target?.isContentEditable) return
       const state = useGameStore.getState()
-      if (event.code === 'KeyM' && (state.phase === 'playing' || state.phase === 'map')) {
+      if (event.code === 'F2' && ['playing', 'paused', 'debug'].includes(state.phase)) {
+        event.preventDefault()
+        if (state.phase === 'debug') state.closeDebug()
+        else state.openDebug()
+      } else if (event.code === 'KeyM' && (state.phase === 'playing' || state.phase === 'map')) {
         event.preventDefault()
         if (state.phase === 'map') state.closeMap()
         else state.openMap()

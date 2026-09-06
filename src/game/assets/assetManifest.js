@@ -53,9 +53,9 @@ const villageZones = (item) => [
   ...(item.feature === 'farm' || item.feature === 'grain' ? ['farmland'] : []),
 ]
 const buildingAssets = (items, zonesFor) => items.map((item) => ({
-  assetId: item.assetId, name: item.name, category: item.category, zones: zonesFor(item),
-  tags: [item.category, `${item.floors}层`],
-  size: { width: item.width, height: item.floors * item.floorHeight + 2, depth: item.depth },
+  assetId: item.assetId, name: item.name, category: item.category, zones: item.zones || zonesFor(item),
+  tags: item.tags || [item.category, `${item.floors}层`],
+  size: { width: item.width, height: item.floors * item.floorHeight + (item.id==='fire-station'?4:2), depth: item.depth },
 }))
 const environmentAssets = Object.entries(environmentCatalog).map(([assetId, definition]) => ({
   assetId, name: definition.name || names[assetId] || assetId, category: assetId.startsWith('nature.') ? 'ecology' : 'prop',

@@ -1,14 +1,15 @@
 import { roadPoints } from '../roads/roadGeometry.js'
 import { biomeCatalog } from './catalog.js'
 import { insideRegion } from '../worldConfig.js'
+import { ecologyWeights } from '../generation/createHierarchy.js'
 
 const distanceToBounds = (b, x, z) => Math.hypot(Math.max(b.minX - x, 0, x - b.maxX), Math.max(b.minZ - z, 0, z - b.maxZ))
 export function regionAt(plan, x, z) {
   return plan.regions.find((region) => insideRegion(region, x, z)) || null
 }
 export function sampleEcology(plan, x, z) {
-  const weights = new Map()
-  for (const region of plan.regions) {
+  const weights = plan.hierarchy ? ecologyWeights(plan.hierarchy, x, z) : new Map()
+  for (const region of plan.hierarchy ? [] : plan.regions) {
     if (!region.bounds) continue
     const distance = distanceToBounds(region.bounds, x, z)
     if (distance > 32) continue

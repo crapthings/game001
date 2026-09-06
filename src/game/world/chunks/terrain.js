@@ -4,6 +4,7 @@ import { compileRoadNetwork, sampleRoad } from '../roads/roadGeometry.js'
 import { sampleEcology } from '../biomes/sampleEcology.js'
 import { biomeCatalog, chooseBiomeAsset } from '../biomes/catalog.js'
 import { surfaceAt } from '../settlements/frontage.js'
+import { createTopographySampler } from '../generation/topography.js'
 
 export const CHUNK_SIZE = 32
 export const CHUNK_SEGMENTS = 32
@@ -13,6 +14,7 @@ export const TERRAIN_VERSION = 1
 
 const smooth = (value) => value * value * (3 - 2 * value)
 export function createTerrain(seed, settlements = [], plan = null) {
+  const topography = plan?.topography ? createTopographySampler(plan.topography) : null
   const roads = compileRoadNetwork([...(plan?.roads || []), ...settlements.flatMap((town) => town.roads.map(road=>({ ...road,sidewalk:town.kind==='city' && Boolean(town.frontageVersion) })))])
   const samples = new Map()
   const roadIndex = new Map()
@@ -52,10 +54,12 @@ export function createTerrain(seed, settlements = [], plan = null) {
   }
   const pathDistance = (x, z) => Math.abs(z - Math.sin(x / 42) * 8)
   function height(x, z) {
-    const profile = ecology(x, z)
-    const base = profile.elevation + noise(x, z, 80, 'hills') * profile.roughness + noise(x, z, 24, 'detail') * 0.35
-    const surface = townSurface(settlements, x, z)
+    const profile = topography ? null : ecology(x, z)
+    const base = topography ? topography.base(x, z).height : profile.elevation + noise(x, z, 80, 'hills') * profile.roughness + noise(x, z, 24, 'detail') * 0.35
+    const surface = townSurface(settlements, x, z, true)
     const townHeight = surface ? base * (1 - surface.weight) + surface.town.elevation * surface.weight : base
+    // 新地形道路随地面起伏；旧世界仍保留原来的零海拔路基。
+    if (topography) return townHeight
     const road = nearbyRoad(x, z)
     const t = Math.max(0, Math.min(1, (road.distance - road.width / 2 - 1) / 8))
     return townHeight * (1 - (1 - smooth(t)) * road.fade)

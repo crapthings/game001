@@ -1,4 +1,7 @@
 import { createRandom } from './random.js'
+import { createHierarchy, ecologyWeights } from './createHierarchy.js'
+import { createTopography } from './topography.js'
+import { selectSettlementSite } from '../settlements/selectSettlementSite.js'
 import { WORLD_BOUNDS, WORLD_SIZE, WORLD_UNIT, insideRegion } from '../worldConfig.js'
 import { biomeCatalog } from '../biomes/catalog.js'
 import { createRegionalRoadPlan } from '../roads/createRegionalRoadPlan.js'
@@ -24,7 +27,7 @@ const colorHex = (color) => '#' + color.map((value) => Math.round(value * 255).t
 export function generateWorld(seed) {
   seed = normalizeSeed(seed)
   const random = createRandom(seed, 'world-layout-v2')
-  const cuts = () => [-1024, -512 + Math.round((random() - 0.5) * 112), Math.round((random() - 0.5) * 112), 512 + Math.round((random() - 0.5) * 112), 1024]
+  const cuts = () => [-1024, -512, 0, 512, 1024]
   const xs = cuts(), zs = cuts()
   const roles = shuffled(['city', 'city', 'city', 'village', 'village', 'village', 'village', 'woodland', 'woodland', 'meadow', 'farmland', 'farmland', 'wetland', 'wetland', 'quarry', 'scrubland'], random)
   const spawnColumn = xs.findIndex((value, index) => index < 4 && value <= 0 && xs[index + 1] > 0)
@@ -67,13 +70,41 @@ export function generateWorld(seed) {
     region.citySize = citySizes[index]
     region.tags.push(region.citySize)
   })
+  const hierarchy = createHierarchy(seed, regions)
+  const topography = createTopography(seed, hierarchy)
+  for (const region of regions) {
+    if (region.kind === 'wilderness') {
+      region.biome = [...ecologyWeights(hierarchy, ...region.center)].sort((a, b) => b[1] - a[1])[0][0]
+      region.name = `${biomeCatalog[region.biome].name} ${region.id.split('-').slice(1).map(Number).map(n => n + 1).join('-')}`
+      region.color = colorHex(biomeCatalog[region.biome].color)
+      region.tags = [region.kind, region.biome]
+    } else {
+      region.site = selectSettlementSite(seed, region, topography)
+      region.center = region.site.center
+    }
+    region.ecology = []
+    region.description = `${region.name}，生态由跨区域连续场生成。`
+  }
   const settlements = regions.filter((region) => region.kind !== 'wilderness').map((region) => createRegionalSettlement(seed, region))
-  const roads = createRegionalRoadPlan(settlements)
+  for (const town of settlements) {
+    const { site, bounds } = regions.find(region => region.id === town.regionId)
+    town.elevation = site.elevation
+    town.terrainBlend = Math.max(1, Math.min(64, town.bounds.minX - bounds.minX, bounds.maxX - town.bounds.maxX, town.bounds.minZ - bounds.minZ, bounds.maxZ - town.bounds.maxZ))
+  }
+  for (const cell of hierarchy.cells) {
+    cell.settlementIds = settlements.filter(town => town.bounds.minX < cell.bounds.maxX && town.bounds.maxX > cell.bounds.minX && town.bounds.minZ < cell.bounds.maxZ && town.bounds.maxZ > cell.bounds.minZ).map(town => town.id)
+  }
+  const roads = createRegionalRoadPlan(settlements, topography)
   const regionalSegments = compileRoadNetwork(roads)
   for (const town of settlements) {
     // 跨区公路优先，地块和组合装饰避让走廊；不让道路穿过建筑。
     town.placements = town.placements.filter(placement => !blocksRoad(placement,regionalSegments,1))
     const owners = new Set(town.placements.map(item=>item.id))
+    if(town.facilities) town.facilities=town.facilities.filter(item=>owners.has(item.id))
+    for(const block of town.blocks || []) {
+      if(block.parcels)block.parcels=block.parcels.filter(parcel=>owners.has(parcel.buildingId))
+      if(block.coverage!==undefined)block.coverage=town.placements.filter(item=>item.blockId===block.id).reduce((sum,item)=>sum+item.footprint.width*item.footprint.depth,0)/((block.bounds.maxX-block.bounds.minX)*(block.bounds.maxZ-block.bounds.minZ))
+    }
     if(town.surfaces) town.surfaces=town.surfaces.filter(surface=>!surface.ownerId || owners.has(surface.ownerId))
     const allSegments=compileRoadNetwork([...roads,...town.roads])
     town.decorations = town.decorations.filter(placement => {
@@ -85,7 +116,7 @@ export function generateWorld(seed) {
   }
   const startRegion = regions.find((region) => insideRegion(region, 0, 0))
   const spawnTown = settlements.find((town) => town.regionId === startRegion.id)
-  return { seed, generatorVersion: GENERATOR_VERSION, planVersion: PLAN_VERSION, unitSize: WORLD_UNIT, size: WORLD_SIZE, bounds: { ...WORLD_BOUNDS }, terrainVersion: 2, environmentVersion: 1, roadPlanVersion: 3, regions, settlements, roads, spawn: [spawnTown.gate[0] + 20, spawnTown.gate[1]] }
+  return { seed, hierarchy, topography, generatorVersion: GENERATOR_VERSION, planVersion: PLAN_VERSION, unitSize: WORLD_UNIT, size: WORLD_SIZE, bounds: { ...WORLD_BOUNDS }, terrainVersion: 2, environmentVersion: 1, roadPlanVersion: 3, regions, settlements, roads, spawn: [spawnTown.gate[0] + 20, spawnTown.gate[1]] }
 }
 
 export function appendNewRegions() {

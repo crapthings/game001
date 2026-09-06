@@ -18,8 +18,18 @@ export function validateDocument(document, seed) {
   if (document?.schemaVersion !== SCHEMA_VERSION) throw new Error('存档版本不兼容，已保留原始数据。')
   const world = document.world, progress = document.progress
   if (world?.seed !== seed || world.generatorVersion !== 2 || world.planVersion !== 2 || !Array.isArray(world.regions) || world.regions.length === 0 || !Number.isInteger(document.revision)) throw new Error('世界存档无效，已保留原始数据。')
+  if (world.hierarchy) {
+    const h = world.hierarchy
+    if (h.version !== 1 || !Array.isArray(h.macros) || h.macros.length !== 4 || !Array.isArray(h.cells) || h.cells.length !== 64 || !Array.isArray(h.warpPhase) || h.warpPhase.length !== 2 || !h.warpPhase.every(Number.isFinite)) throw new Error('分层规划无效。')
+    if (!h.cells.every((cell, index) => cell.id === `cell-${Math.floor(index / 8)}-${index % 8}` && biomeCatalog[cell.biome] && Array.isArray(cell.center) && cell.center.length === 2 && cell.center.every(Number.isFinite) && world.regions.some(region => region.id === cell.parentId))) throw new Error('细分生态规划无效。')
+  }
+  if (world.topography) {
+    const field = world.topography
+    if (!world.hierarchy || field.version !== 1 || !Array.isArray(field.anchors) || field.anchors.length !== 4 || !field.anchors.every(anchor => anchor && ['x', 'z', 'height', 'moisture'].every(key => Number.isFinite(anchor[key])) && anchor.moisture >= 0 && anchor.moisture <= 1) || !Array.isArray(field.waves) || field.waves.length !== 3 || !field.waves.every(wave => wave && ['wavelength', 'amplitude', 'angle', 'phase'].every(key => Number.isFinite(wave[key])) && wave.wavelength > 0)) throw new Error('地形底图无效。')
+  }
   if (world.unitSize !== 1 || world.size !== WORLD_SIZE || world.terrainVersion !== 2 || world.environmentVersion !== 1 || !world.bounds || !Object.entries(WORLD_BOUNDS).every(([key, value]) => world.bounds[key] === value) || !Array.isArray(world.spawn) || world.spawn.length !== 2 || !world.spawn.every(Number.isFinite)) throw new Error('2048 米世界规格无效。')
   if (!Array.isArray(world.roads) || !world.roads.every((road) => Array.isArray(road.from) && road.from.length === 2 && road.from.every(Number.isFinite) && Array.isArray(road.to) && road.to.length === 2 && road.to.every(Number.isFinite) && Number.isFinite(road.width) && road.width > 0 && validPath(road))) throw new Error('区域道路存档无效。')
+  if (!world.roads.every(road => !road.routing || (road.routing.version === 1 && road.routing.gridSize === 16 && ['length', 'wetLength', 'maxSlope'].every(key => Number.isFinite(road.routing[key]) && road.routing[key] >= 0)))) throw new Error('区域道路寻路数据无效。')
   const ids = new Set()
   for (const region of world.regions) {
     if (typeof region.id !== 'string' || ids.has(region.id) || typeof region.name !== 'string' || typeof region.color !== 'string' || !Array.isArray(region.tags) || !region.tags.every((tag) => typeof tag === 'string') || !Array.isArray(region.center) || region.center.length !== 2 || !region.center.every(Number.isFinite) || !Number.isFinite(region.radius) || region.radius <= 0 || !Array.isArray(region.placements)) throw new Error('区域存档无效，已保留原始数据。')
@@ -52,6 +62,7 @@ export function validateDocument(document, seed) {
     for (const town of world.settlements) {
       if (![1, 2].includes(town.revision) || town.catalogVersion !== 1 || typeof town.id !== 'string' || !Number.isFinite(town.elevation) || !town.bounds || !['minX', 'maxX', 'minZ', 'maxZ'].every((key) => Number.isFinite(town.bounds[key])) || !Array.isArray(town.placements) || !Array.isArray(town.roads)) throw new Error('城镇规划版本或范围无效。')
       if (town.revision === 2 && (town.streetPlanVersion !== 3 || !['small','medium','large'].includes(town.citySize))) throw new Error('城市尺度规划无效。')
+      if (town.terrainBlend !== undefined && (!Number.isFinite(town.terrainBlend) || town.terrainBlend <= 0 || town.terrainBlend > 64)) throw new Error('聚落地形过渡无效。')
       if (!ids.has(town.regionId) || town.bounds.minX >= town.bounds.maxX || town.bounds.minZ >= town.bounds.maxZ) throw new Error('城镇范围或所属区域无效。')
       for (const placement of town.placements) {
         if (typeof placement.id !== 'string' || typeof placement.assetId !== 'string' || !Array.isArray(placement.position) || placement.position.length !== 3 || !placement.position.every(Number.isFinite) || !Number.isFinite(placement.rotation) || !Number.isFinite(placement.scale) || placement.scale <= 0 || !Number.isFinite(placement.footprint?.width) || !Number.isFinite(placement.footprint?.depth) || placement.footprint.width <= 0 || placement.footprint.depth <= 0) throw new Error('建筑地块存档无效。')

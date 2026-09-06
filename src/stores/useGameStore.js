@@ -3,6 +3,9 @@ import { create } from 'zustand'
 export const useGameStore = create((set) => ({
   phase: 'menu',
   sessionAuthorized: false,
+  debugReturnPhase: 'playing',
+  openDebug: () => set(state => ['playing', 'paused'].includes(state.phase) ? { phase: 'debug', debugReturnPhase: state.phase } : state),
+  closeDebug: () => set(state => state.phase === 'debug' ? { phase: state.debugReturnPhase } : state),
   openInventory: () => set((state) => state.phase === 'playing' ? { phase: 'inventory' } : state),
   closeInventory: () => set((state) => state.phase === 'inventory' ? { phase: 'playing' } : state),
   beginLoading: () => set({ phase: 'loading', sessionAuthorized: true }),

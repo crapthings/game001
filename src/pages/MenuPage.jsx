@@ -35,7 +35,7 @@ export default function MenuPage() {
           {error && <p role="alert" className="rounded-xl bg-red-950 p-3 text-sm text-red-100">{error}</p>}
           <button type="submit" className={buttonClass}>进入世界</button>
         </form>
-        <div className="mt-5 border-t border-white/10 pt-5 text-center"><Link to="/assets" className="text-xs text-stone-500 underline-offset-4 hover:text-emerald-300 hover:underline">开发者资产目录</Link></div>
+        <div className="mt-5 border-t border-white/10 pt-5 text-center"><Link to="/assets" className="text-xs text-stone-500 underline-offset-4 hover:text-emerald-300 hover:underline">开发者资产目录</Link><Link to="/world-plan" className="ml-4 text-xs text-stone-500 underline-offset-4 hover:text-emerald-300 hover:underline">世界规划调试</Link></div>
       </section>
     </main>
   )

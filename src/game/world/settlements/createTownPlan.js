@@ -7,7 +7,7 @@ export const TOWN_PLAN_VERSION = 1
 // 初版街区：十个地块各使用一种模型；后续城镇生成器可按 category 选取与重复实例化。
 export function createTownPlan(seed) {
   const random = createRandom(seed, 'starter-town', TOWN_PLAN_VERSION)
-  const models = [...buildingCatalog]
+  const models = buildingCatalog.filter(model=>!model.style)
   for (let index = models.length - 1; index > 0; index -= 1) {
     const other = Math.floor(random() * (index + 1))
     const previous = models[index]
@@ -31,12 +31,13 @@ export function createTownPlan(seed) {
   }
 }
 
-export function townSurface(towns, x, z) {
+export function townSurface(towns, x, z, terrain = false) {
   for (const town of towns) {
     const b = town.bounds
     const outside = Math.max(b.minX - x, x - b.maxX, b.minZ - z, z - b.maxZ, 0)
-    if (outside >= 16) continue
-    const t = Math.min(1, outside / 16)
+    const blend = terrain ? (town.terrainBlend || 16) : 16
+    if (outside >= blend) continue
+    const t = Math.min(1, outside / blend)
     return { town, weight: 1 - t * t * (3 - 2 * t) }
   }
   return null

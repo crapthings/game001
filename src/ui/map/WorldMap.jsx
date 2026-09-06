@@ -3,11 +3,13 @@ import { useGameStore } from '../../stores/useGameStore.js'
 import { useWorldStore } from '../../stores/useWorldStore.js'
 import { useNavigationStore } from '../../stores/useNavigationStore.js'
 import MapCanvas from './MapCanvas.jsx'
+import { useDebugStore } from '../../stores/useDebugStore.js'
 
 const buttonClass = 'rounded-lg border border-stone-500/30 bg-stone-900 px-3 py-2 text-sm text-stone-200 hover:bg-stone-800 focus-visible:outline-2 focus-visible:outline-emerald-300'
 
 export default function WorldMap() {
   const navigation = useNavigationStore()
+  const revealMap = useDebugStore(state => state.revealMap)
   const plan = useWorldStore((state) => state.document?.world)
   const closeMap = useGameStore((state) => state.closeMap)
   const [center, setCenter] = useState(() => ({ x: navigation.position.x, z: navigation.position.z }))
@@ -60,7 +62,7 @@ export default function WorldMap() {
           </div>
         </div>
         <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-500/20 px-4 py-3 text-xs text-stone-400">
-          <span>深黑：未探索 · 暗色：已探索 · 亮色：附近</span>
+          <span>{revealMap ? '开发调试：地图全显 · 真实探索记录不变' : '深黑：未探索 · 暗色：已探索 · 亮色：附近'}</span>
           <span className="font-mono tabular-nums">X {navigation.position.x.toFixed(1)} / Z {navigation.position.z.toFixed(1)}</span>
           <span>拖动平移 · 滚轮缩放 · 北 +Z · 世界已暂停</span>
         </footer>

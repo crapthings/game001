@@ -5,7 +5,8 @@ import { HUMAN_SCALE } from '../../world/worldMetrics.js'
 
 // 所有部件先按材质合并，再合为共享模板；运行时通过 createInstance 复用。
 export function createBuildingModel(scene, definition, material) {
-  const { id, width: w, depth: d, floors, floorHeight, palette, accent } = definition
+  const { width: w, depth: d, floors, floorHeight, palette, accent } = definition
+  const id = definition.style || definition.id
   const random = createRandom(definition.modelSeed, 'details')
   const parts = []
   const wall = material(palette), trim = material('#5d605c'), concrete = material('#666963')
@@ -49,8 +50,9 @@ export function createBuildingModel(scene, definition, material) {
         }
       }
       for (const side of [-1, 1]) {
-        for (let row = 0; row < 3; row += 1) {
-          const z = bodyZ + (row - 1) * bodyDepth / 3.5
+        const rows = definition.style ? Math.max(2,Math.floor(bodyDepth/3)) : 3
+        for (let row = 0; row < rows; row += 1) {
+          const z = definition.style ? bodyZ-bodyDepth/2+(row+0.5)*bodyDepth/rows : bodyZ + (row - 1) * bodyDepth / 3.5
           box('side-window-frame', 0.12, 1.5, 1.6, side * (bodyWidth / 2 + 0.05), y, z, trim)
           box('side-window', 0.15, 1.2, 1.35, side * (bodyWidth / 2 + 0.12), y, z, dark)
         }
@@ -110,9 +112,38 @@ export function createBuildingModel(scene, definition, material) {
       for (const x of [-1.5, 1.5]) box('porch-post', 0.15, 2.8, 0.15, x, 1.55, front + 1.2, wood)
       if (id === 'townhouse') box('facade-stripe', 0.45, height, 0.15, -w / 2 + 0.8, slab + height / 2, front + 0.1, accentMaterial)
     }
+    if (definition.id === 'row-homes') {
+      for (const x of [-8,-4,4,8]) {
+        box('separate-entry',0.95,2.1,0.22,x,slab+1.05,front+0.22,dark)
+        box('entry-step',1.4,0.2,0.7,x,0.1,front+0.5,concrete)
+        box('party-wall-band',0.16,height,0.14,x+1.7,slab+height/2,front+0.08,trim)
+      }
+    }
+    if (['hospital','school','fire-station'].includes(id)) {
+      box('institution-sign',w*0.55,0.7,0.22,0,height-0.3,front+0.2,accentMaterial)
+      if(id==='hospital') {
+        box('emergency-canopy',7,0.25,2.2,0,3.2,front+0.7,accentMaterial)
+        for(const x of [-1.1,1.1]) box('entrance-glass',1.8,2.5,0.25,x,1.6,front+0.26,dark)
+        box('medical-emblem-h',1.5,0.35,0.28,0,height-0.3,front+0.4,material('#bac9ba'))
+        box('medical-emblem-v',0.35,1.5,0.28,0,height-0.3,front+0.4,material('#bac9ba'))
+        box('roof-plant',5,1.2,3,-w/4,height+0.9,-d/4,metal)
+      } else if(id==='school') {
+        box('entry-portico',5,0.22,1.8,0,3.2,front+0.65,accentMaterial)
+        for(const x of [-2,2]) box('portico-post',0.18,2.9,0.18,x,1.65,front+1.15,concrete)
+        cylinder('flagpole',0.07,5,w/2-1,2.5,front+1,metal)
+        box('faded-flag',0.7,0.4,0.025,w/2-0.65,4.6,front+1,accentMaterial)
+      } else {
+        for(const x of [-5,0,5]) {
+          box('garage-frame',4.3,3.7,0.2,x,2.2,front+0.16,accentMaterial)
+          box('garage-door',3.8,3.3,0.24,x,2.05,front+0.3,metal)
+          for(let row=0;row<9;row+=1) box('garage-slat',3.7,0.04,0.26,x,0.65+row*0.35,front+0.34,trim)
+        }
+        box('hose-tower',2.5,4,2.5,w/2-2,height+2,-d/2+2,wall)
+      }
+    }
     if (id === 'apartments') {
       for (let floor = 1; floor < floors; floor += 1) {
-        for (const x of [-3.7, 3.7]) {
+        for (const x of (definition.id==='long-apartments'?[-9,-3,3,9]:[-3.7,3.7])) {
           const y = slab + floor * floorHeight
           box('balcony', 2.6, 0.18, 1.2, x, y, front + 0.5, concrete)
           box('balcony-rail', 2.6, 0.08, 0.1, x, y + 0.9, front + 1, metal)
@@ -125,7 +156,7 @@ export function createBuildingModel(scene, definition, material) {
       box('sign-board', w - 1.4, 0.72, 0.22, 0, height + slab - 0.65, front + 0.2, accentMaterial)
       if (id === 'corner-store' || id === 'diner') {
         box('awning', w + 0.3, 0.18, 1.4, 0, 2.95, front + 0.6, accentMaterial)
-        for (const side of [-1, 1]) box('shopfront', 3, 1.7, 0.18, side * 3.1, 1.65, front + 0.17, dark)
+        for (const x of (definition.id==='market-hall'?[-10,-6,-2,2,6,10]:[-3.1,3.1])) box('shopfront', 3, 1.7, 0.18, x, 1.65, front + 0.17, dark)
         if (id === 'diner') {
           for (const x of [-3, 3]) box('outside-bench', 2, 0.35, 0.55, x, 0.65, front + 1, wood)
           box('exhaust', 0.8, 1.8, 0.8, w / 2 - 1.2, height + 1, -d / 2 + 1.2, metal)
@@ -151,7 +182,7 @@ export function createBuildingModel(scene, definition, material) {
       }
       if (id === 'warehouse') {
         box('dock', w + 0.8, 0.45, 1.4, 0, 0.35, front + 0.6, concrete)
-        for (const x of [-4.5, 4.5]) box('shipping-crate', 1.3, 1.3, 1.2, x, 1.2, front + 0.6, wood)
+        for (const x of (definition.id==='deep-workshop'?[-2.5,2.5]:[-4.5,4.5])) box('shipping-crate', 1.3, 1.3, 1.2, x, 1.2, front + 0.6, wood)
       } else {
         for (let index = 0; index < 3; index += 1) cylinder('discarded-tire', 0.8, 0.25, -w / 2 + 0.6, 0.5 + index * 0.25, front + 0.7, dark)
       }

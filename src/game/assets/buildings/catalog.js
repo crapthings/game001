@@ -1,4 +1,5 @@
 import { createRandom } from '../../world/generation/random.js'
+import { extendedBuildingCatalog } from './extendedCatalog.js'
 
 // 10 个可重复使用的逻辑资产。modelSeed 固定外观，世界 seed 只决定它们如何布置。
 const recipes = [
@@ -30,5 +31,6 @@ export const buildingCatalog = recipes.map(([id, name, category, width, depth, f
     sockets: [{ id: 'entry', position: [0, 0, depth / 2 + 2], facing: [0, 0, 1] }],
   }
 })
+buildingCatalog.push(...extendedBuildingCatalog)
 const byId = new Map(buildingCatalog.map((entry) => [entry.assetId, entry]))
 export const getBuildingDefinition = (assetId) => byId.get(assetId)

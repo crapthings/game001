@@ -2,7 +2,7 @@ import { roadPoints } from '../world/roads/roadGeometry.js'
 import { FOG_CELL_SIZE, FOG_GROUP_SIZE, REVEAL_RADIUS, isExplored } from './fog.js'
 
 // 只读取规划与探索数据，不触发区块生成或素材加载。北方为世界 +Z。
-export function drawMap(ctx, width, height, { center, span, position, heading, fog, plan, radar }) {
+export function drawMap(ctx, width, height, { center, span, position, heading, fog, plan, radar, revealMap = false }) {
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = '#080e0e'
   ctx.fillRect(0, 0, width, height)
@@ -12,7 +12,7 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   const zMin = center.z - height / (2 * scale), zMax = center.z + height / (2 * scale)
   const cells = []
   // 遍历已存的探索块，而非放大到全域时遍历所有未知格。
-  for (const [key, mask] of Object.entries(fog)) {
+  for (const [key, mask] of revealMap ? [] : Object.entries(fog)) {
     const [groupX, groupZ] = key.split(',').map(Number)
     const originX = groupX * FOG_GROUP_SIZE * FOG_CELL_SIZE, originZ = groupZ * FOG_GROUP_SIZE * FOG_CELL_SIZE
     if (originX > xMax || originX + 32 < xMin || originZ > zMax || originZ + 32 < zMin) continue
@@ -30,7 +30,11 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   }
   // 所有地图要素都受已探索格裁切，未知区不会泄露建筑或地名。
   ctx.beginPath()
-  for (const [x, y] of cells) ctx.rect(x, y, FOG_CELL_SIZE * scale + 0.5, FOG_CELL_SIZE * scale + 0.5)
+  if (revealMap) {
+    const b = plan.bounds
+    const [x, y] = screen(b.minX, b.maxZ)
+    ctx.rect(x, y, (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale)
+  } else for (const [x, y] of cells) ctx.rect(x, y, FOG_CELL_SIZE * scale + 0.5, FOG_CELL_SIZE * scale + 0.5)
   ctx.clip()
   ctx.fillStyle = '#293c35'
   ctx.fillRect(0, 0, width, height)
@@ -89,7 +93,7 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   ctx.moveTo(px + REVEAL_RADIUS * scale, py)
   ctx.arc(px, py, REVEAL_RADIUS * scale, 0, Math.PI * 2, true)
   ctx.clip('evenodd')
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+  ctx.fillStyle = revealMap ? 'rgba(0, 0, 0, 0)' : 'rgba(0, 0, 0, 0.4)'
   ctx.fillRect(0, 0, width, height)
   ctx.restore()
   ctx.restore()
@@ -117,7 +121,7 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
     ctx.textAlign = 'center'
     for (const town of plan.settlements || []) {
       const x = (town.bounds.minX + town.bounds.maxX) / 2, z = (town.bounds.minZ + town.bounds.maxZ) / 2
-      if (!isExplored(fog, x, z)) continue
+      if (!revealMap && !isExplored(fog, x, z)) continue
       const [sx, sy] = screen(x, z)
       ctx.fillStyle = '#eee1b6'
       ctx.fillText(town.name, sx, sy - 13)

@@ -1,7 +1,9 @@
 import { defineRoad } from './roadProfiles.js'
 import { roundRoadPath } from './roadGeometry.js'
+import { createTerrainRouter } from './createTerrainRouter.js'
 
-export function createRegionalRoadPlan(settlements) {
+export function createRegionalRoadPlan(settlements, topography = null) {
+  const router = topography ? createTerrainRouter(settlements, topography) : null
   const candidates = []
   for (let from = 0; from < settlements.length; from += 1) for (let to = from + 1; to < settlements.length; to += 1) {
     let best
@@ -21,6 +23,18 @@ export function createRegionalRoadPlan(settlements) {
   // 增加两条非树边，提供绕行路线，不让整个世界只有单一树状通路。
   chosen.push(...candidates.filter(edge => !chosen.includes(edge)).slice(0,2))
   return chosen.map(({ from,to,a,b }) => {
+    if (router) {
+      const pairs = []
+      for (const start of settlements[from].gates || [settlements[from].gate]) for (const end of settlements[to].gates || [settlements[to].gate]) {
+        pairs.push({ start, end, distance: Math.hypot(start[0] - end[0], start[1] - end[1]) })
+      }
+      pairs.sort((a, b) => a.distance - b.distance)
+      for (const pair of pairs) {
+        const result = router.route(from, to, pair.start, pair.end)
+        if (result) return defineRoad(`link-${from}-${to}`, result.points, 'regional', { routing: result.routing })
+      }
+      throw new Error(`无法连接 ${settlements[from].name} 与 ${settlements[to].name}，请更换种子；未使用穿越聚落的直线路径。`)
+    }
     const corners = [[b[0],a[1]],[a[0],b[1]]]
     const score = (corner) => {
       const points = [a,corner,b]

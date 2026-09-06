@@ -8,7 +8,8 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { createStreamedWorld } from '../world/chunks/createStreamedWorld.js'
 import { createCharacterModel } from '../assets/characters/createCharacterModel.js'
 import { PLAYER_ASSET_ID } from '../assets/characters/catalog.js'
-import { createStamina } from '../entities/createStamina.js'
+import { createStamina, STAMINA } from '../entities/createStamina.js'
+import { useDebugStore } from '../../stores/useDebugStore.js'
 import { usePlayerStatusStore } from '../../stores/usePlayerStatusStore.js'
 import { createMovementInput } from '../core/createMovementInput.js'
 import { useGameStore } from '../../stores/useGameStore.js'
@@ -177,18 +178,26 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     const wantsSprint = input.wantsSprint()
     const needs = useWorldStore.getState().document?.progress.survival
     const depleted = needs && (needs.food <= 0 || needs.water <= 0)
-    const distance = Math.min(stamina.speed(wantsSprint && !depleted) * dt, direction.distance ?? Infinity)
+    const debug = useDebugStore.getState()
+    const sprintAllowed = wantsSprint && (debug.infiniteSprint || !depleted)
+    const speed = debug.infiniteSprint && sprintAllowed ? STAMINA.runSpeed : stamina.speed(sprintAllowed)
+    const multiplier = sprintAllowed && speed === STAMINA.runSpeed ? debug.sprintMultiplier : 1
+    const distance = Math.min(speed * multiplier * dt, direction.distance ?? Infinity)
     const dx = direction.x * distance, dz = direction.z * distance
     const oldX = position.x, oldZ = position.z
-    if (world.canMove(position.x + dx, position.z + dz)) {
-      position.x += dx
-      position.z += dz
-    } else {
-      if (world.canMove(position.x + dx, position.z)) position.x += dx
-      if (world.canMove(position.x, position.z + dz)) position.z += dz
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.2))
+    const stepX = dx / steps, stepZ = dz / steps
+    for (let step = 0; step < steps; step++) {
+      if (world.canMove(position.x + stepX, position.z + stepZ)) {
+        position.x += stepX
+        position.z += stepZ
+      } else {
+        if (world.canMove(position.x + stepX, position.z)) position.x += stepX
+        if (world.canMove(position.x, position.z + stepZ)) position.z += stepZ
+      }
     }
     const moving = Math.hypot(position.x - oldX, position.z - oldZ) > 0.001
-    const running = stamina.update(dt, moving, wantsSprint && !depleted)
+    const running = debug.infiniteSprint ? moving && sprintAllowed : stamina.update(dt, moving, sprintAllowed)
     foodDecay += SURVIVAL.foodPerSecond * dt * (running ? 1.5 : 1)
     waterDecay += SURVIVAL.waterPerSecond * dt * (running ? 2 : 1)
     if (moving) player.root.rotation.y = Math.atan2(direction.x, direction.z)
@@ -197,7 +206,7 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     navigationTimer += dt
     if (navigationTimer >= 0.1) {
       navigationTimer = 0
-      usePlayerStatusStore.getState().publish(stamina.hud())
+      usePlayerStatusStore.getState().publish(debug.infiniteSprint ? { ...stamina.hud(), mode: running ? 'running' : moving ? 'walking' : 'idle' } : stamina.hud())
       useNavigationStore.getState().update({ x: position.x, y: position.y, z: position.z }, player.root.rotation.y)
     }
     saveTimer += dt

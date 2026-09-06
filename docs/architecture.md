@@ -1,5 +1,9 @@
 # 世界架构
 
+`#/world-plan` 提供 [世界规划二维调试页](world-plan-debug.md)，按 seed 查看当前生成算法的区域覆盖色与街区。
+
+最新建筑比例、设施配额和分层地块见 [建筑与地块 v2](urban-parcels.md)。
+
 新建城镇采用 [临街地块布局](frontage.md)，建筑从路边推算位置，配套入口小径、院落和路边带。
 
 背包使用独立 inventory 阶段与持久化进度事件，B 打开，详见 [背包系统](inventory.md)。

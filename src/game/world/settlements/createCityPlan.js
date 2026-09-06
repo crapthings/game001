@@ -3,59 +3,82 @@ import { expandAssembly } from '../../assets/environment/catalog.js'
 import { createRandom } from '../generation/random.js'
 import { compileRoadNetwork, sampleRoad } from '../roads/roadGeometry.js'
 import { createCityRoadPlan } from './createCityRoadPlan.js'
-import { frontageProfile, addFrontage, blocksRoad, overlapsPlacement, placementBounds } from './frontage.js'
+import { overlapsPlacement } from './frontage.js'
+import { urbanProfiles, districtProfiles, createUrbanBlocks, frontageCandidates } from './urbanPlanning.js'
+import { placeUrbanBuilding } from './placeUrbanBuilding.js'
 
 export function createCityPlan(seed, region) {
-  const [cx, cz] = region.center, id = `settlement.${region.id}`
-  const { profile, roads, gates } = createCityRoadPlan(region, id)
-  const blocks = [], placements = [], decorations = [], surfaces = []
-  const localRoads = compileRoadNetwork(roads)
-  const cuts = profile.cuts
-  const families = { residential: ['house', 'townhouse', 'apartments'], commercial: ['corner-store', 'diner', 'townhouse'], civic: ['clinic', 'police'], industrial: ['workshop', 'warehouse'] }
-  for (let row = 0; row < cuts.length - 1; row += 1) for (let column = 0; column < cuts.length - 1; column += 1) {
-    const blockId = `${id}/block:${row}:${column}`
-    const random = createRandom(seed, blockId, 'city-block-v1')
-    const kind = row === 0 ? 'industrial' : row === 2 && column === 1 ? 'park' : row === 1 && column === 2 ? 'civic' : row === 1 || row === 2 ? 'commercial' : 'residential'
-    const x = (cuts[column] + cuts[column + 1]) / 2, z = (cuts[row] + cuts[row + 1]) / 2
-    blocks.push({ id: blockId, kind, bounds: { minX: cx + cuts[column], maxX: cx + cuts[column + 1], minZ: cz + cuts[row], maxZ: cz + cuts[row + 1] } })
-    if (kind === 'park') {
-      for (const dx of [-12, 12]) for (const dz of [-12, 12]) decorations.push({ id: `${blockId}/tree:${dx}:${dz}`, assetId: 'nature.broadleaf', position: [cx + x + dx, 0, cz + z + dz], rotation: 0, scale: 1 })
-      decorations.push(...expandAssembly(`${blockId}/rest`, 'yard.rest-stop', [cx + x, 0, cz + z]))
+  const [cx,cz]=region.center,id=`settlement.${region.id}`
+  const {profile,roads,gates}=createCityRoadPlan(region,id)
+  const policy=urbanProfiles[region.citySize] || urbanProfiles.medium
+  const blocks=createUrbanBlocks(seed,region,profile,id)
+  const placements=[],decorations=[],surfaces=[],facilities=[]
+  const segments=compileRoadNetwork(roads)
+  const catalog=new Map(buildingCatalog.map(model=>[model.id,model]))
+  // 设施先占地，普通建筑后填充；大设施每街区最多一座，诊所/警务站可共享街区。
+  const facilityIds=Object.entries(policy.facilities).flatMap(([modelId,count])=>Array(count).fill(modelId))
+    .sort((a,b)=>catalog.get(b).width*catalog.get(b).depth-catalog.get(a).width*catalog.get(a).depth)
+  for(const modelId of facilityIds) {
+    const model=catalog.get(modelId),major=['hospital','school','fire-station'].includes(modelId)
+    const candidates=blocks.filter(block=>block.kind!=='park' && !block.majorFacility && (major?block.parcels.length===0:block.parcels.length<2))
+      .sort((a,b)=>{
+        const score=block=>(block.kind==='industrial'?10000:0)+block.parcels.length*5000-(block.bounds.maxX-block.bounds.minX)*(block.bounds.maxZ-block.bounds.minZ)
+        return score(a)-score(b)||a.id.localeCompare(b.id)
+      })
+    let placed
+    for(const block of candidates) {
+      const b=block.bounds,x=(b.minX+b.maxX)/2,z=(b.minZ+b.maxZ)/2
+      const anchors=[[x,b.minZ+12],[x,b.maxZ-12],[b.minX+12,z],[b.maxX-12,z],...frontageCandidates(block,createRandom(seed,block.id,modelId),18)]
+      for(const anchor of anchors) {
+        placed=placeUrbanBuilding({model,anchor,block,segments,placements,surfaces,id:`${id}/facility:${modelId}`,gap:5})
+        if(placed)break
+      }
+      if(placed) {
+        block.kind='civic';block.majorFacility=major;placed.facility=modelId
+        facilities.push({id:placed.id,modelId,blockId:block.id})
+        break
+      }
+    }
+  }
+  for(const block of blocks) {
+    const b=block.bounds,x=(b.minX+b.maxX)/2,z=(b.minZ+b.maxZ)/2
+    if(block.kind==='park') {
+      for(const dx of [-10,10]) for(const dz of [-10,10]) decorations.push({id:`${block.id}/tree:${dx}:${dz}`,assetId:'nature.broadleaf',position:[x+dx,0,z+dz],rotation:0,scale:1})
+      decorations.push(...expandAssembly(`${block.id}/rest`,'yard.rest-stop',[x,0,z]))
       continue
     }
-    const xs = cuts[column + 1] - cuts[column] >= 60 ? [-12, 12] : [0]
-    const zs = cuts[row + 1] - cuts[row] >= 60 ? [-12, 12] : [0]
-    for (const dx of xs) for (const dz of zs) {
-      const family = families[kind]
-      // 每个地块只随机一次；查找期间必须保持目标 ID 不变。
-      const modelId = family[Math.floor(random() * family.length)]
-      const model = buildingCatalog.find((entry) => entry.id === modelId)
-      if (!model) throw new Error(`城市建筑配方缺失：${modelId}（${blockId}）`)
-      const anchorX = cx+x+dx, anchorZ = cz+z+dz
-      const road = sampleRoad(localRoads,anchorX,anchorZ), segment = road.segment
-      const t = Math.max(0,Math.min(1,((anchorX-segment.ax)*segment.dx+(anchorZ-segment.az)*segment.dz)/segment.lengthSquared))
-      const roadX=segment.ax+t*segment.dx, roadZ=segment.az+t*segment.dz
-      const length=Math.hypot(anchorX-roadX,anchorZ-roadZ)
-      if(length<0.01) continue
-      const nx=(anchorX-roadX)/length,nz=(anchorZ-roadZ)/length
-      const frontage=frontageProfile(model.category)
-      const distance=segment.width/2+frontage.verge+frontage.setback+model.depth/2
-      const wx=roadX+nx*distance,wz=roadZ+nz*distance,rotation=Math.atan2(-nx,-nz)
-      const placement={ id: `${blockId}/lot:${dx}:${dz}`, assetId: model.assetId, position: [wx, 0, wz], rotation, scale: 1, footprint: model.footprint, entrance: model.entrance }
-      const bounds=placementBounds(placement)
-      if(bounds.x-bounds.hx<cx+cuts[column] || bounds.x+bounds.hx>cx+cuts[column+1] || bounds.z-bounds.hz<cz+cuts[row] || bounds.z+bounds.hz>cz+cuts[row+1]) continue
-      if(blocksRoad(placement,localRoads) || placements.some(other=>overlapsPlacement(placement,other,2))) continue
-      placements.push(placement)
-      addFrontage(surfaces,placement,model,frontage)
+    const settings=districtProfiles[block.kind]
+    const random=createRandom(seed,block.id,'parcels-v2')
+    const area=(b.maxX-b.minX)*(b.maxZ-b.minZ)
+    let occupied=placements.filter(item=>item.blockId===block.id).reduce((sum,item)=>sum+item.footprint.width*item.footprint.depth,0)
+    const anchors=frontageCandidates(block,random,settings.spacing)
+    if(!block.majorFacility) for(let index=0;index<anchors.length && placements.length<policy.maxBuildings;index+=1) {
+      if(random()<0.13)continue // 少量空地作为庭院与残缺街沿，随机流按街区隔离。
+      const offset=Math.floor(random()*settings.models.length)
+      const angle=(random()-0.5)*2*(block.kind==='industrial'?1:policy.jitter)*Math.PI/180
+      const setback=random()*(block.kind==='commercial'?0.6:1.6)
+      for(let attempt=0;attempt<3;attempt+=1) {
+        const model=catalog.get(settings.models[(offset+attempt)%settings.models.length])
+        const coverage=model.footprint.width*model.footprint.depth
+        if(occupied+coverage>area*settings.coverage)continue
+        const placed=placeUrbanBuilding({model,anchor:anchors[index],block,segments,placements,surfaces,id:`${block.id}/lot:${index}`,angle,setback,gap:settings.gap})
+        if(placed){occupied+=coverage;break}
+      }
     }
-    // 街区中心预留院落，避免与四角建筑相叠。
-    if (xs.length > 1 && zs.length > 1) decorations.push(...expandAssembly(`${blockId}/yard`, kind === 'industrial' ? 'yard.worksite' : 'yard.rest-stop', [cx + x, 0, cz + z]))
+    block.coverage=occupied/area
+    block.openSpace=block.majorFacility?'institution-yard':block.kind==='industrial'?'service-yard':'shared-courtyard'
+    decorations.push(...expandAssembly(`${block.id}/yard`,block.kind==='industrial'?'yard.worksite':'yard.rest-stop',[x,0,z]))
   }
-  // 装饰组合也避让新加入的弯道和服务巷道。
-  const clearDecorations = decorations.filter((item) => {
-    const road = sampleRoad(localRoads, item.position[0], item.position[2])
-    return road.distance > road.width / 2 + 3 && !placements.some(building=>overlapsPlacement({ ...item,footprint:{width:6,depth:6} },building,1))
+  const clearDecorations=decorations.filter(item=>{
+    const road=sampleRoad(segments,item.position[0],item.position[2])
+    return road.distance>road.width/2+3 && !placements.some(building=>overlapsPlacement({...item,footprint:{width:6,depth:6}},building,1))
   })
-  const extent = profile.span / 2 + 12
-  return { id, regionId: region.id, kind: 'city', citySize: region.citySize || 'medium', name: region.name, revision: 2, catalogVersion: 1, streetPlanVersion: 3, frontageVersion: 1, elevation: 0, bounds: { minX: cx - extent, maxX: cx + extent, minZ: cz - extent, maxZ: cz + extent }, gate: gates[0], gates, roads, blocks, placements, surfaces, decorations: clearDecorations }
+  const districts=['residential','commercial','industrial','civic','park'].map(kind=>({
+    id:`${id}/district:${kind}`,kind,blockIds:blocks.filter(block=>block.kind===kind).map(block=>block.id),
+  })).filter(district=>district.blockIds.length)
+  for(const block of blocks)block.districtId=`${id}/district:${block.kind}`
+  const extent=profile.span/2+12
+  return {id,regionId:region.id,kind:'city',citySize:region.citySize||'medium',name:region.name,revision:2,catalogVersion:1,streetPlanVersion:3,frontageVersion:1,urbanPlanVersion:2,elevation:0,
+    bounds:{minX:cx-extent,maxX:cx+extent,minZ:cz-extent,maxZ:cz+extent},gate:gates[0],gates,roads,districts,blocks,facilities,
+    facilityQuotas:{...policy.facilities},placements,surfaces,decorations:clearDecorations}
 }

@@ -7,6 +7,8 @@ import PlayerStatusHud from './PlayerStatusHud.jsx'
 import WorldTimeHud from './WorldTimeHud.jsx'
 import InventoryPanel from './InventoryPanel.jsx'
 import Quickbar from './Quickbar.jsx'
+import DebugMenu from './DebugMenu.jsx'
+import { useDebugStore } from '../stores/useDebugStore.js'
 
 const buttonClass = 'rounded-xl border border-white/15 bg-slate-800 px-5 py-3 text-sm font-medium transition hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300'
 
@@ -16,15 +18,18 @@ export default function GameOverlay() {
   const resumeGame = useGameStore((state) => state.resumeGame)
   const returnToMenu = useGameStore((state) => state.returnToMenu)
   const error = useWorldStore((state) => state.error)
+  const debugActive = useDebugStore(state => state.revealMap || state.infiniteSprint || state.sprintMultiplier !== 1)
   const errorMessage = error && <p role="alert" className="rounded-xl bg-red-950 p-3 text-sm text-red-100">{error}</p>
 
   if (phase === 'loading') return null
+  if (phase === 'debug') return <DebugMenu />
   if (phase === 'playing' || phase === 'map' || phase === 'inventory') {
     return (
       <>
         <RadarHud />
         <PlayerStatusHud />
         <WorldTimeHud />
+        {phase === 'playing' && <button type="button" onClick={() => useGameStore.getState().openDebug()} className={`absolute left-4 top-20 z-10 rounded border border-white/10 bg-black/65 px-2 py-1 text-[10px] hover:text-emerald-200 ${debugActive ? 'text-amber-300' : 'text-stone-400'}`}>{debugActive ? '调试已启用' : '开发'} · F2</button>}
         {phase === 'map' && <WorldMap />}
         {phase === 'inventory' && <InventoryPanel />}
         {phase === 'playing' && <Quickbar />}
@@ -43,6 +48,7 @@ export default function GameOverlay() {
         <div className="mt-6 flex flex-col gap-3">
           {errorMessage}
           <button type="button" className={buttonClass} onClick={resumeGame}>继续游戏</button>
+          <button type="button" className={buttonClass} onClick={() => useGameStore.getState().openDebug()}>开发调试 · F2</button>
           <button type="button" className={buttonClass} onClick={() => { returnToMenu(); navigate('/', { replace: true }) }}>返回主菜单</button>
         </div>
       </div>
