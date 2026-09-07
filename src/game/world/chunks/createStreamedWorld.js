@@ -1,3 +1,5 @@
+import { ENVIRONMENT_ASSETS } from '../biomes/environmentField.js'
+import { openingBlocksPlacement } from '../opening/openingGeometry.js'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
@@ -17,6 +19,8 @@ export function createStreamedWorld(scene, plan) {
   const terrain = createTerrain(plan.seed, towns, plan)
   const assets = createAssetRegistry(scene)
   const loaded = new Map()
+  const locks = new Map(), dynamicColliders = new Map()
+  const pinned = () => new Map([...locks.values()].flat().map(chunk => [chunk.key, chunk]))
   const material = new StandardMaterial('terrain-material', scene)
   material.diffuseColor = Color3.White()
   material.specularColor = Color3.Black()
@@ -26,6 +30,7 @@ export function createStreamedWorld(scene, plan) {
   let direction = { x: 0, z: 0 }
   const retired = []
   const warmup = [...new Set([
+    ...(plan.environmentVersion === 2 ? ENVIRONMENT_ASSETS : []),
     ...Object.values(biomeCatalog).flatMap((biome) => biome.assets.map(([id]) => id)),
     ...towns.flatMap((town) => [...town.placements, ...(town.decorations || [])].map((item) => item.assetId)),
     ...plan.regions.flatMap((region) => region.placements.map((item) => item.assetId)),
@@ -83,6 +88,7 @@ export function createStreamedWorld(scene, plan) {
     yield
     const colliders = []
     for (const placement of data.placements) {
+      if (openingBlocksPlacement(plan.opening, placement, environmentCatalog[placement.assetId])) continue
       if (!placement.planned && !placement.building && !placement.decoration && plan.regions.some((region) => region.placements.length > 0 && Math.hypot(placement.position[0] - region.center[0], placement.position[2] - region.center[1]) < region.radius)) continue
       const x = placement.position[0], z = placement.position[2]
       // 不占用出生点；地标代理留待真实交互素材接入。
@@ -116,7 +122,11 @@ export function createStreamedWorld(scene, plan) {
     const ahead = chunkAt(x + direction.x * 24, z + direction.z * 24)
     const inBounds = (chunk) => insideWorld(plan.bounds, (chunk.x + 0.5) * CHUNK_SIZE, (chunk.z + 0.5) * CHUNK_SIZE)
     required = requiredChunks(center).filter(inBounds)
-    wanted = new Map(required.map((chunk) => [chunk.key, chunk]))
+    const locked = pinned()
+    const requiredMap = new Map(required.map(chunk => [chunk.key, chunk]))
+    for (const [key, chunk] of locked) requiredMap.set(key, chunk)
+    required = [...requiredMap.values()]
+    wanted = new Map(requiredMap)
     // 当前近邻优先，前方 24m 的预测窗口提前计算下一排区块。
     for (const chunk of requiredChunks(ahead).filter(inBounds)) {
       if (!wanted.has(chunk.key)) wanted.set(chunk.key, chunk)
@@ -130,7 +140,7 @@ export function createStreamedWorld(scene, plan) {
     }
     for (const [key, entry] of loaded) {
       const [cx, cz] = key.split(',').map(Number)
-      if (Math.abs(cx - center.x) > KEEP_RADIUS || Math.abs(cz - center.z) > KEEP_RADIUS) {
+      if (!locked.has(key) && (Math.abs(cx - center.x) > KEEP_RADIUS || Math.abs(cz - center.z) > KEEP_RADIUS)) {
         entry.root.setEnabled(false)
         retired.push(entry.root)
         loaded.delete(key)
@@ -161,19 +171,35 @@ export function createStreamedWorld(scene, plan) {
   return {
     terrain,
     update,
+    lockBounds(bounds) {
+      const token = Symbol('scene-preload'), chunks = []
+      const b = { minX: Math.max(plan.bounds.minX, bounds.minX), maxX: Math.min(plan.bounds.maxX, bounds.maxX), minZ: Math.max(plan.bounds.minZ, bounds.minZ), maxZ: Math.min(plan.bounds.maxZ, bounds.maxZ) }
+      for (let z = Math.floor(b.minZ / CHUNK_SIZE); z < Math.ceil(b.maxZ / CHUNK_SIZE); z++) {
+        for (let x = Math.floor(b.minX / CHUNK_SIZE); x < Math.ceil(b.maxX / CHUNK_SIZE); x++) chunks.push({ x, z, key: chunkKey(x, z), priority: 0 })
+      }
+      if (new Set([...pinned().keys(), ...chunks.map(chunk => chunk.key)]).size > 128) throw new Error('开场预加载超过 128 个区块预算。')
+      locks.set(token, chunks)
+      return () => locks.delete(token)
+    },
+    addCollider(id, sample) {
+      dynamicColliders.set(id, sample)
+      return () => dynamicColliders.delete(id)
+    },
     getStats: () => ({ loaded: loaded.size, queued: required.filter((chunk) => !loaded.has(chunk.key)).length, required: required.length, ready: required.filter((chunk) => loaded.has(chunk.key)).length, templatesReady: templateCount - warmup.length, templatesTotal: templateCount, pending: Boolean(pending), assembling: Boolean(assembling), center }),
     // 所有导航与移动共用这层检查，不依赖美术模型的三角面。
-    canMove(x, z) {
+    isLoaded(x,z) { const at=chunkAt(x,z); return loaded.has(chunkKey(at.x,at.z)) },
+    canMove(x, z, radius = HUMAN_SCALE.collisionRadius, ignoreId = null) {
       if (!insideWorld(plan.bounds, x, z, 1)) return false
       const at = chunkAt(x, z)
       if (!loaded.has(chunkKey(at.x, at.z))) return false
-      for (const entry of loaded.values()) {
+      const dynamic = [...dynamicColliders].filter(([id]) => id !== ignoreId).map(([, sample]) => sample()).filter(Boolean)
+      for (const entry of [...loaded.values(), { colliders: dynamic }]) {
         if (entry.colliders.some((obstacle) => {
           const dx = x - obstacle.x, dz = z - obstacle.z
-          if (obstacle.radius !== undefined) return Math.hypot(dx, dz) < obstacle.radius + HUMAN_SCALE.collisionRadius
+          if (obstacle.radius !== undefined) return Math.hypot(dx, dz) < obstacle.radius + radius
           const cosine = Math.cos(obstacle.rotation), sine = Math.sin(obstacle.rotation)
           const localX = dx * cosine - dz * sine, localZ = dx * sine + dz * cosine
-          return Math.abs(localX) < obstacle.halfWidth + HUMAN_SCALE.collisionRadius && Math.abs(localZ) < obstacle.halfDepth + HUMAN_SCALE.collisionRadius
+          return Math.abs(localX) < obstacle.halfWidth + radius && Math.abs(localZ) < obstacle.halfDepth + radius
         })) return false
       }
       return true
@@ -188,6 +214,8 @@ export function createStreamedWorld(scene, plan) {
       queue = []
       for (const entry of loaded.values()) entry.root.dispose()
       loaded.clear()
+      locks.clear()
+      dynamicColliders.clear()
       assets.dispose()
       material.dispose()
     },

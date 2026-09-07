@@ -1,3 +1,7 @@
+import { generateEnvironment } from './generateEnvironment.js'
+import { roadsideRelief, environmentColor } from '../biomes/environmentField.js'
+import { openingWeight, openingBlocksPlacement } from '../opening/openingGeometry.js'
+import { environmentCatalog } from '../../assets/environment/catalog.js'
 import { createRandom } from '../generation/random.js'
 import { townSurface } from '../settlements/createTownPlan.js'
 import { compileRoadNetwork, sampleRoad } from '../roads/roadGeometry.js'
@@ -55,11 +59,20 @@ export function createTerrain(seed, settlements = [], plan = null) {
   const pathDistance = (x, z) => Math.abs(z - Math.sin(x / 42) * 8)
   function height(x, z) {
     const profile = topography ? null : ecology(x, z)
-    const base = topography ? topography.base(x, z).height : profile.elevation + noise(x, z, 80, 'hills') * profile.roughness + noise(x, z, 24, 'detail') * 0.35
+    let base = topography ? topography.base(x, z).height : profile.elevation + noise(x, z, 80, 'hills') * profile.roughness + noise(x, z, 24, 'detail') * 0.35
+    if (plan?.terrainVersion === 4) {
+      const road = nearbyRoad(x, z)
+      const edge = road.distance - road.width / 2
+      const detailWeight = smooth(Math.max(0, Math.min(1, (edge - 1) / 10)))
+      base += roadsideRelief(road) + noise(x, z, 32, 'ground-relief-v2') * 0.65 * detailWeight
+    }
     const surface = townSurface(settlements, x, z, true)
     const townHeight = surface ? base * (1 - surface.weight) + surface.town.elevation * surface.weight : base
     // 新地形道路随地面起伏；旧世界仍保留原来的零海拔路基。
-    if (topography) return townHeight
+    if (topography) {
+      const weight = openingWeight(plan?.opening, x, z)
+      return weight ? townHeight * (1 - weight) + plan.opening.grading.elevation * weight : townHeight
+    }
     const road = nearbyRoad(x, z)
     const t = Math.max(0, Math.min(1, (road.distance - road.width / 2 - 1) / 8))
     return townHeight * (1 - (1 - smooth(t)) * road.fade)
@@ -101,10 +114,14 @@ export function generateChunk(terrain, cx, cz) {
       const variation = terrain.noise(wx, wz, 12, 'color') * 0.025
       const town = townSurface(terrain.settlements, wx, wz)
       const weight = town?.weight || 0
-      const natural = terrain.ecology(wx, wz).color.map((value) => value + variation)
+      const opening = terrain.plan?.opening
+      const parking = opening?.parking.bounds
+      const inParking = parking && wx >= parking.minX && wx <= parking.maxX && wz >= parking.minZ && wz <= parking.maxZ
+      let natural = (inParking ? [0.38, 0.37, 0.32] : terrain.ecology(wx, wz).color).map((value) => value + variation)
       const park = town?.town.blocks?.some((block) => block.kind === 'park' && wx > block.bounds.minX + 7 && wx < block.bounds.maxX - 7 && wz > block.bounds.minZ + 7 && wz < block.bounds.maxZ - 7)
       const urban = (park ? [0.26, 0.32, 0.20] : [0.31, 0.30, 0.26]).map((value) => value + variation)
       const road = terrain.nearbyRoad(wx, wz)
+      if (terrain.plan?.environmentVersion === 2 && !inParking) natural = environmentColor(terrain, wx, wz, natural, road)
       const surface = surfaceAt(town?.town.surfaces,wx,wz)
       const frontageColors={yard:[0.30,0.31,0.22],path:[0.46,0.44,0.36],apron:[0.38,0.38,0.34],verge:[0.40,0.37,0.29]}
       // 小径与院落直接融入地面顶点颜色，不增加零散贴片和碰撞。
@@ -123,6 +140,10 @@ export function generateChunk(terrain, cx, cz) {
       indices.push(a, a + 1, a + stride, a + 1, a + stride + 1, a + stride)
     }
   }
+  if (terrain.plan?.environmentVersion === 2) {
+    placements.push(...generateEnvironment(terrain, cx, cz))
+    return { x: cx, z: cz, key: chunkKey(cx, cz), positions, indices, colors, placements }
+  }
   for (let index = 0; index < 36; index += 1) {
     const random = createRandom(terrain.seed, terrain.plan?.terrainVersion || TERRAIN_VERSION, 'chunk-props', cx, cz, index)
     const x = Math.round(cx * CHUNK_SIZE + (index % 6 + 0.3 + random() * 0.4) * CHUNK_SIZE / 6)
@@ -132,7 +153,8 @@ export function generateChunk(terrain, cx, cz) {
     const road = terrain.nearbyRoad(x, z)
     if (road.distance < road.width / 2 + 3 || townSurface(terrain.settlements, x, z)?.weight > 0.5) continue
     const assetId = chooseBiomeAsset(biomeCatalog[profile.biome], random)
-    placements.push({ id: `terrain/${cx}/${cz}/${index}`, assetId, position: [x, terrain.height(x, z), z], rotation: random() * Math.PI * 2, scale: 0.85 + random() * 0.4 })
+    const placement = { id: `terrain/${cx}/${cz}/${index}`, assetId, position: [x, terrain.height(x, z), z], rotation: random() * Math.PI * 2, scale: 0.85 + random() * 0.4 }
+    if (!openingBlocksPlacement(terrain.plan?.opening, placement, environmentCatalog[assetId])) placements.push(placement)
   }
   return { x: cx, z: cz, key: chunkKey(cx, cz), positions, indices, colors, placements }
 }

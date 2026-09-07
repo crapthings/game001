@@ -1,3 +1,4 @@
+import { createWorldSeed } from '../game/world/generation/seed.js'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useWorldStore } from '../stores/useWorldStore.js'
@@ -13,9 +14,9 @@ export default function WorldPlanPage() {
   const [plan,setPlan]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('')
   const [selected,setSelected]=useState(null),[focus,setFocus]=useState(null)
   const [source,setSource]=useState('当前算法')
-  const [layers,setLayers]=useState({macros:false,regions:false,details:false,settlements:true,roads:true,labels:true})
+  const [layers,setLayers]=useState({macros:false,regions:false,details:false,settlements:true,roads:true,labels:true,spawns:false,scenes:false,scatter:false,opening:true})
   const [baseMap,setBaseMap]=useState('ecology')
-  const visibleBase = !plan?.topography && !['ecology','regions'].includes(baseMap) ? 'ecology' : baseMap
+  const visibleBase = baseMap === 'groves' && plan?.environmentVersion !== 2 ? 'ecology' : !plan?.topography && !['ecology','regions'].includes(baseMap) ? 'ecology' : baseMap
   const worker=useRef(null)
   const timeout=useRef(null)
   const stopWorker=()=>{
@@ -59,15 +60,16 @@ export default function WorldPlanPage() {
       <div><h1 className="text-sm font-semibold">世界规划调试</h1><p className="mt-1 text-[10px] text-stone-500">2048 × 2048 m · 北 +Z · 平面覆盖预览</p></div>
       <form className="flex min-w-0 flex-wrap gap-2" onSubmit={event=>{event.preventDefault();generate(seed)}}>
         <input aria-label="世界种子" value={seed} maxLength={80} onChange={event=>setSeed(event.target.value)} className="min-w-0 flex-1 rounded-md border border-white/15 bg-black/30 px-3 py-2 text-xs sm:w-48"/>
-        <button type="button" title="随机种子并生成" aria-label="随机种子并生成" className={control} onClick={()=>generate(Array.from(crypto.getRandomValues(new Uint32Array(2)),value=>value.toString(36)).join('-'))}>⚄</button>
+        <button type="button" title="随机种子并生成" aria-label="随机种子并生成" className={control} onClick={()=>generate(createWorldSeed(seed))}>⚄</button>
         <button className={control} type="submit">{busy?'重新生成':'生成预览'}</button>
         <Link className={control} to="/">菜单</Link>
       </form>
     </header>
     <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-white/10 px-4 py-2 text-xs">
-      <select aria-label="底图图层" className="rounded border border-white/15 bg-[#172321] px-2 py-1.5 text-xs" value={visibleBase} onChange={event=>setBaseMap(event.target.value)}>{Object.entries(terrainLayers).map(([key,value])=><option key={key} value={key} disabled={!plan?.topography && !['ecology','regions'].includes(key)}>{value.label}</option>)}</select>
-      {Object.entries({macros:'2×2 大板块',regions:'4×4 区域',details:'8×8 细分',settlements:'聚落 / 街区',roads:'道路中心线',labels:'区域名称'}).map(([key,label])=><label key={key} className="flex items-center gap-1.5"><input type="checkbox" checked={layers[key]} onChange={event=>setLayers(value=>({...value,[key]:event.target.checked}))}/>{label}</label>)}
+      <select aria-label="底图图层" className="rounded border border-white/15 bg-[#172321] px-2 py-1.5 text-xs" value={visibleBase} onChange={event=>setBaseMap(event.target.value)}>{Object.entries(terrainLayers).map(([key,value])=><option key={key} value={key} disabled={(key === 'groves' && plan?.environmentVersion !== 2) || (!plan?.topography && !['ecology','regions'].includes(key))}>{value.label}</option>)}</select>
+      {Object.entries({macros:'2×2 大板块',regions:'4×4 区域',details:'8×8 生态',scenes:'16×16 场景',scatter:'32×32 散布',opening:'边缘开场',settlements:'聚落 / 街区',roads:'道路中心线',labels:'区域名称',spawns:'感染者出生点'}).map(([key,label])=><label key={key} className="flex items-center gap-1.5"><input type="checkbox" checked={layers[key]} onChange={event=>setLayers(value=>({...value,[key]:event.target.checked}))}/>{label}</label>)}
       <button className={control} onClick={()=>setFocus(null)}>全世界</button>
+      <button className={control} disabled={!plan?.opening} onClick={()=>setFocus(plan.opening.bounds)}>聚焦开场</button>
       <button className={control} disabled={!region} onClick={()=>setFocus(region.bounds)}>聚焦所选区域</button>
       {current && <button className={control} onClick={()=>{stopWorker();setBusy(false);setError('');setPlan(current);setSource('本次游戏快照');setSelected(null);setFocus(null)}}>查看本次游戏快照</button>}
     </div>
@@ -80,7 +82,16 @@ export default function WorldPlanPage() {
       <aside className="min-h-0 overflow-y-auto border-t border-white/10 bg-[#111b1a] p-4 md:border-l md:border-t-0">
         <h2 className="text-xs font-semibold">{region?.name || '世界概览'}</h2>
         <p className="mt-2 text-[10px] leading-5 text-stone-400">{terrainLayers[visibleBase].legend}</p>
-        {plan?.topography && <p className="mt-1 text-[10px] leading-5 text-stone-500">地形图层为聚落整地前数据。游戏内聚落按选址标高整平，道路贴合地面。</p>}
+        {plan?.topography && <p className="mt-1 text-[10px] leading-5 text-stone-500">原始地形与最终高度可切换；最终高度包含聚落及开场整地，普通公路仍贴合地面。</p>}
+        {plan?.environmentVersion === 2 && <p className="mt-2 text-[10px] leading-5 text-emerald-200/80">环境 v2：连续树群、路肩地被、浅沟土坡与山脊沟谷。开场按车辆、步行和镜头通道留白。</p>}
+        {plan?.opening && <div className="mt-3 rounded border border-emerald-300/20 p-2 text-[10px] leading-5 text-stone-400">
+          <p className="text-emerald-200">断油停车点 · {{north:'北',east:'东',south:'南',west:'西'}[plan.opening.edge]}侧入口</p>
+          <p>32 个候选 · 尝试 {plan.opening.selection.attempts} 次</p>
+          <p>停车前直线路面检查通过 · 宽 {plan.opening.validation.width} m</p>
+          <p>最大采样纵坡 {(plan.opening.validation.maxGrade * 100).toFixed(2)}%</p>
+          <p>绿色为道路走向，黄色为停车点，棕色为路障，紫色为镜头锚点。</p>
+          <p className="text-amber-200/80">接入公路已连通，车辆通过性未校验。车停在路障前，玩家独白后探索；路障两侧可步行绕过。</p>
+        </div>}
         {routedRoads.length > 0 && <div className="mt-3 rounded border border-white/10 p-2 text-[10px] leading-5 text-stone-400">
           <p>区域公路 {routedRoads.length} 条 · {(routedRoads.reduce((sum, road) => sum + road.routing.length, 0)/1000).toFixed(2)} km</p>
           <p>潮湿路段约 {Math.round(routedRoads.reduce((sum, road) => sum + road.routing.wetLength, 0))} m</p>
@@ -94,11 +105,11 @@ export default function WorldPlanPage() {
           <p>平均坡度 {region.site.meanSlope.toFixed(1)}° · 占地高差 {region.site.relief.toFixed(1)} m</p>
           <p>要求：坡度 ≤ {region.site.policy.slope}°，连通率 ≥ {region.site.policy.coverage*100}%，高差 ≤ {region.site.policy.relief} m</p>
         </div>}
-        <p className="mt-2 text-xs leading-6 text-stone-400">{region?`${Math.round(area)} m² · 占全图 ${(area/(plan.size*plan.size)*100).toFixed(1)}%`:'4.19 km² · 16 个规划区域'}<br/>{town?`${town.placements.length} 栋建筑 · ${town.blocks?.length || 0} 个街区`:region?'自然生态区域':'城市小 / 中 / 大各一座，另有四个村庄'}</p>
+        <p className="mt-2 text-xs leading-6 text-stone-400">{region?`${Math.round(area)} m² · 占全图 ${(area/(plan.size*plan.size)*100).toFixed(1)}%`:'4.19 km² · 16 个规划区域'}<br/>{town?`${town.placements.length} 栋建筑 · ${town.blocks?.length || 0} 个街区`:region?'自然生态区域':`城市 ${plan?.settlements.filter(item=>item.kind==='city').length || 0} 座 · 村庄 ${plan?.settlements.filter(item=>item.kind==='village').length || 0} 处 · 野外 POI ${plan?.poiPlan?.placedCount || 0} / ${plan?.poiPlan?.targetCount || 0} 处`}</p>
         {region && <p className="mt-2 font-mono text-[10px] leading-5 text-stone-500">X {region.bounds.minX} ～ {region.bounds.maxX}<br/>Z {region.bounds.minZ} ～ {region.bounds.maxZ}</p>}
         <h2 className="mb-2 mt-5 text-xs">区域图例</h2>
         <div className="grid grid-cols-2 gap-2">{Object.entries(zoneLabels).map(([key,label])=><span key={key} className="flex items-center gap-2 text-[10px] text-stone-400"><i className="h-2.5 w-2.5 rounded-sm" style={{background:zoneColors[key]}}/>{label}</span>)}</div>
-        <p className="mt-4 text-[10px] leading-5 text-stone-500">街区：绿为住宅，黄为商业，紫为工业，蓝为公共设施，深绿为公园。新世界按 1024 / 512 / 256 m 分层管理；生态底色以 32 m 精度采样游戏算法，边界线仅表示管理范围。旧快照保留原生态圈。</p>
+        <p className="mt-4 text-[10px] leading-5 text-stone-500">街区：绿为住宅，黄为商业，紫为工业，蓝为公共设施，深绿为公园。新世界按 1024 / 512 / 256 / 128 / 64 m 分层管理，细层仅保存占用引用；生态底色以 32 m 精度采样游戏算法，边界线仅表示管理范围。旧快照保留原生态圈。</p>
         <div className="mt-4 space-y-1">{plan?.regions.map(item=><button key={item.id} className={`block w-full rounded px-2 py-1.5 text-left text-xs ${selected===item.id?'bg-emerald-900/50 text-emerald-200':'text-stone-400 hover:bg-white/5'}`} onClick={()=>{setSelected(item.id);if(focus)setFocus(item.bounds)}}>{item.name}</button>)}</div>
         <p className="mt-4 text-[10px] leading-5 text-stone-500">当前算法预览不读取或覆盖存档。旧世界的布局可能不同，可用本次游戏快照对比。道路为规划线形，不是破损路面贴图。</p>
       </aside>

@@ -1,3 +1,4 @@
+import OpeningOverlay from './OpeningOverlay.jsx'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../stores/useGameStore.js'
 import { useWorldStore } from '../stores/useWorldStore.js'
@@ -9,19 +10,23 @@ import InventoryPanel from './InventoryPanel.jsx'
 import Quickbar from './Quickbar.jsx'
 import DebugMenu from './DebugMenu.jsx'
 import { useDebugStore } from '../stores/useDebugStore.js'
+import FlashlightHud from './FlashlightHud.jsx'
+import WeaponHud from './WeaponHud.jsx'
 
 const buttonClass = 'rounded-xl border border-white/15 bg-slate-800 px-5 py-3 text-sm font-medium transition hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300'
 
 export default function GameOverlay() {
   const navigate = useNavigate()
   const phase = useGameStore((state) => state.phase)
+  const pauseReturnPhase = useGameStore(state => state.pauseReturnPhase)
   const resumeGame = useGameStore((state) => state.resumeGame)
   const returnToMenu = useGameStore((state) => state.returnToMenu)
   const error = useWorldStore((state) => state.error)
-  const debugActive = useDebugStore(state => state.revealMap || state.infiniteSprint || state.sprintMultiplier !== 1)
+  const debugActive = useDebugStore(state => state.infiniteAmmo || state.revealMap || state.infiniteSprint || state.sprintMultiplier !== 1 || state.pauseSpawning || state.showSpawns)
   const errorMessage = error && <p role="alert" className="rounded-xl bg-red-950 p-3 text-sm text-red-100">{error}</p>
 
   if (phase === 'loading') return null
+  if (phase === 'cinematic') return <OpeningOverlay />
   if (phase === 'debug') return <DebugMenu />
   if (phase === 'playing' || phase === 'map' || phase === 'inventory') {
     return (
@@ -29,10 +34,12 @@ export default function GameOverlay() {
         <RadarHud />
         <PlayerStatusHud />
         <WorldTimeHud />
+        <FlashlightHud />
         {phase === 'playing' && <button type="button" onClick={() => useGameStore.getState().openDebug()} className={`absolute left-4 top-20 z-10 rounded border border-white/10 bg-black/65 px-2 py-1 text-[10px] hover:text-emerald-200 ${debugActive ? 'text-amber-300' : 'text-stone-400'}`}>{debugActive ? '调试已启用' : '开发'} · F2</button>}
         {phase === 'map' && <WorldMap />}
         {phase === 'inventory' && <InventoryPanel />}
         {phase === 'playing' && <Quickbar />}
+        {phase === 'playing' && <WeaponHud />}
 
         {error && <div className="absolute bottom-4 right-4 z-30 max-w-sm">{errorMessage}</div>}
       </>
@@ -48,7 +55,7 @@ export default function GameOverlay() {
         <div className="mt-6 flex flex-col gap-3">
           {errorMessage}
           <button type="button" className={buttonClass} onClick={resumeGame}>继续游戏</button>
-          <button type="button" className={buttonClass} onClick={() => useGameStore.getState().openDebug()}>开发调试 · F2</button>
+          {pauseReturnPhase !== 'cinematic' && <button type="button" className={buttonClass} onClick={() => useGameStore.getState().openDebug()}>开发调试 · F2</button>}
           <button type="button" className={buttonClass} onClick={() => { returnToMenu(); navigate('/', { replace: true }) }}>返回主菜单</button>
         </div>
       </div>

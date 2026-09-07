@@ -119,6 +119,7 @@ export function createPlayer(scene) {
   let time = 0, gait = 0, stride = 0
   return {
     root,
+    setEnabled(enabled) { root.setEnabled(enabled); shadow.setEnabled(enabled) },
     update(dt, moving, height, running = false) {
       time += dt
       stride += ((moving ? 1 : 0) - stride) * Math.min(1, dt * 14)
@@ -136,6 +137,7 @@ export function createPlayer(scene) {
       // 静止时仅轻微呼吸，不改变根节点坐标或存档位置。
       const breathing = Math.sin(time * 2) * 0.002 * (1 - stride)
       rig.scaling.y = HUMAN_SCALE.playerModelScale * (1 + breathing)
+      shadow.setEnabled(root.isEnabled())
       shadow.position.set(root.position.x, height + 0.035, root.position.z)
     },
     dispose() {

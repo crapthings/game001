@@ -1,3 +1,4 @@
+import { ACTIVE_SEED_KEY } from '../world/generation/seed.js'
 import { validateDocument } from './worldRepository.js'
 import { generateWorld, normalizeSeed } from '../world/generation/generateWorld.js'
 import { createProgress } from '../world/progress.js'
@@ -26,7 +27,7 @@ export const asyncWorldRepository = {
     const seed = normalizeSeed(value), db = await database()
     let document = await new Promise((resolve, reject) => {
       const tx = db.transaction(['worlds', 'progress'], 'readonly')
-      const world = tx.objectStore('worlds').get(seed), progress = tx.objectStore('progress').get(seed)
+      const world = tx.objectStore('worlds').get([3, seed]), progress = tx.objectStore('progress').get([3, seed])
       tx.oncomplete = () => {
         if (!world.result && !progress.result) { resolve(null); return }
         if (!world.result || !progress.result) { reject(new Error('存档数据不完整，已保留原始记录。')); return }
@@ -35,19 +36,17 @@ export const asyncWorldRepository = {
       tx.onabort = () => reject(tx.error || new Error('读取存档失败。'))
     })
     if (!document) {
-      // 旧档只在首次导入时读取，原 localStorage 数据作为备份保留。
-      const raw = localStorage.getItem('game001:world:v2:' + encodeURIComponent(seed))
-      document = raw === null ? { schemaVersion: 2, revision: 0, world: generateWorld(seed), progress: createProgress() } : JSON.parse(raw)
+      document = { schemaVersion: 2, revision: 0, world: generateWorld(seed), progress: createProgress() }
       validateDocument(document, seed)
       await new Promise((resolve, reject) => {
         const tx = db.transaction(['worlds', 'progress'], 'readwrite')
-        tx.objectStore('worlds').add({ schemaVersion: document.schemaVersion, world: document.world }, seed)
-        tx.objectStore('progress').add({ revision: document.revision, progress: document.progress }, seed)
+        tx.objectStore('worlds').add({ schemaVersion: document.schemaVersion, world: document.world }, [3, seed])
+        tx.objectStore('progress').add({ revision: document.revision, progress: document.progress }, [3, seed])
         tx.oncomplete = resolve
-        tx.onabort = () => reject(tx.error || new Error('导入存档失败，请重新进入。'))
+        tx.onabort = () => reject(tx.error || new Error('创建世界失败，请重新进入。'))
       })
     } else validateDocument(document, seed)
-    localStorage.setItem('game001:active-seed:v2', seed)
+    localStorage.setItem(ACTIVE_SEED_KEY, seed)
     return document
   },
   async save(document, progress) {
@@ -56,11 +55,12 @@ export const asyncWorldRepository = {
     await new Promise((resolve, reject) => {
       const tx = db.transaction('progress', 'readwrite'), store = tx.objectStore('progress')
       let conflict = false
-      const request = store.get(document.world.seed)
+      const key = [3, document.world.seed]
+      const request = store.get(key)
       request.onsuccess = () => {
         if (request.result?.revision !== document.revision) { conflict = true; tx.abort(); return }
         // 只写进度；世界规划不再每两秒被解析、校验和序列化。
-        store.put({ revision: next.revision, progress }, document.world.seed)
+        store.put({ revision: next.revision, progress }, key)
       }
       tx.oncomplete = resolve
       tx.onabort = () => reject(conflict ? new Error('存档已在其他页面更新，请返回菜单重新进入该种子。') : tx.error || new Error('进度保存失败。'))

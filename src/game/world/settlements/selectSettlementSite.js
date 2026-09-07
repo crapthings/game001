@@ -1,3 +1,4 @@
+import { overlapsBounds } from '../opening/openingGeometry.js'
 import { createRandom } from '../generation/random.js'
 import { createTopographySampler } from '../generation/topography.js'
 import { cityProfiles } from './cityProfiles.js'
@@ -36,7 +37,7 @@ function evaluateSite(sample, x, z, width, depth, policy) {
   }
 }
 
-export function selectSettlementSite(seed, region, topography) {
+export function selectSettlementSite(seed, region, topography, reservations = []) {
   const village = region.kind === 'village'
   const width = village ? 144 : cityProfiles[region.citySize].span + 24
   const depth = village ? 104 : width
@@ -49,8 +50,11 @@ export function selectSettlementSite(seed, region, topography) {
   for (let row = 0; row < 7; row++) for (let column = 0; column < 7; column++) {
     const x = Math.round(b.minX + marginX + (column + 0.2 + random() * 0.6) / 7 * (b.maxX - b.minX - 2 * marginX))
     const z = Math.round(b.minZ + marginZ + (row + 0.2 + random() * 0.6) / 7 * (b.maxZ - b.minZ - 2 * marginZ))
+    const footprint = { minX: x - width / 2, maxX: x + width / 2, minZ: z - depth / 2, maxZ: z + depth / 2 }
+    if (reservations.some(bounds => overlapsBounds(footprint, bounds, 64))) continue
     const candidate = { center: [x, z], ...evaluateSite(sample, x, z, width, depth, policy) }
     if (!best || (candidate.qualified && !best.qualified) || (candidate.qualified === best.qualified && candidate.score > best.score)) best = candidate
   }
+  if (!best) throw new Error(`${region.name} 没有避开开场预留区的选址。`)
   return { version: 1, ...best, candidateCount: 49, footprint: { width, depth }, policy }
 }

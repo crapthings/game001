@@ -1,8 +1,10 @@
+import { createOpeningDirector } from '../world/opening/createOpeningDirector.js'
 import { Scene } from '@babylonjs/core/scene'
 import { Camera } from '@babylonjs/core/Cameras/camera'
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
+import { SpotLight } from '@babylonjs/core/Lights/spotLight'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { createStreamedWorld } from '../world/chunks/createStreamedWorld.js'
@@ -19,6 +21,12 @@ import { insideRegion, insideWorld } from '../world/worldConfig.js'
 import { createDayNightCycle } from '../world/createDayNightCycle.js'
 import { useWorldTimeStore } from '../../stores/useWorldTimeStore.js'
 import { SURVIVAL } from '../entities/survival.js'
+import { createFlashlight, FLASHLIGHT } from '../entities/createFlashlight.js'
+import { useFlashlightStore } from '../../stores/useFlashlightStore.js'
+import { createVisibility } from '../map/visibility.js'
+import { SPAWN_LIMITS, createSpawnManager } from '../spawning/createSpawnManager.js'
+import { useSpawnStatsStore } from '../../stores/useSpawnStatsStore.js'
+import { createCombat } from '../combat/createCombat.js'
 
 export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
   const scene = new Scene(engine)
@@ -48,12 +56,20 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
   const sun = new DirectionalLight('sun', new Vector3(-0.5, -1, 0.4), scene)
   sun.diffuse = new Color3(1, 0.88, 0.7)
   sun.intensity = 0.9
+  const torch = new SpotLight('player-flashlight', Vector3.Zero(), new Vector3(0,-0.08,1), FLASHLIGHT.halfAngle * 2, 2, scene)
+  torch.diffuse = new Color3(1,0.94,0.76)
+  torch.range = FLASHLIGHT.range
+  torch.intensity = 0
 
   const player = createCharacterModel(scene, PLAYER_ASSET_ID)
-  const input = createMovementInput(canvas, scene, () => useGameStore.getState().phase === 'playing')
+  const input = createMovementInput(() => useGameStore.getState().phase === 'playing')
   let world = null, activePlan = null, lastSaved = null, lastSavedFog = null
+  let spawning = null, opening = null
+  let combat = null, lastSavedCombat = null, headshotShake = 0
   let stamina = createStamina(), lastSavedStamina = null
   let dayNight = createDayNightCycle(), lastSavedWorldTime = null
+  let flashlight = createFlashlight(), lastSavedFlashlight = null
+  const visibility = () => createVisibility(dayNight.lighting().daylight, flashlight.snapshot().enabled)
   let initialChunkCount = 1, ready = false
   let foodDecay = 0, waterDecay = 0
   function flushSurvival() {
@@ -69,6 +85,8 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     const state = dayNight.lighting()
     scene.clearColor.set(state.sky[0], state.sky[1], state.sky[2], 1)
     scene.fogColor.set(...state.fog)
+    scene.fogStart = 32 + state.daylight * 20
+    scene.fogEnd = 58 + state.daylight * 30
     ambient.intensity = state.ambient
     ambient.groundColor.set(state.fog[0] * 0.75, state.fog[1] * 0.8, state.fog[2] * 0.85)
     sun.intensity = state.sun
@@ -78,22 +96,33 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
   }
   function syncWorld(document) {
     if (!document || document.world === activePlan) return
+    opening?.dispose()
+    combat?.dispose()
+    spawning?.dispose()
     world?.dispose()
     world = createStreamedWorld(scene, document.world)
+    spawning = createSpawnManager(scene,document.world,world)
+    combat = createCombat(scene,canvas,player,()=>ready && !opening?.active && useGameStore.getState().phase==='playing',document.progress.combat)
+    lastSavedCombat = JSON.stringify(combat.snapshot())
     ready = false
     activePlan = document.world
     foodDecay = 0; waterDecay = 0
     input.clear()
     stamina = createStamina(document.progress.stamina)
     dayNight = createDayNightCycle(document.progress.worldTime)
+    flashlight = createFlashlight(document.progress.flashlight)
+    useFlashlightStore.getState().publish(flashlight.hud())
+    lastSavedFlashlight = JSON.stringify(flashlight.snapshot())
     lastSavedStamina = JSON.stringify(stamina.snapshot())
     lastSavedWorldTime = dayNight.snapshot()
     usePlayerStatusStore.getState().publish(stamina.hud())
     applyLighting()
-    let position = document.progress.playerPosition || document.world.spawn || [0, 0]
+    const needsOpening = document.world.opening && document.progress.opening?.status !== 'complete'
+    let position = needsOpening ? document.world.spawn : document.progress.playerPosition || document.world.spawn || [0, 0]
     if (!insideWorld(document.world.bounds, ...position, 1)) position = document.world.spawn
     player.root.position.set(position[0], world.terrain.surfaceHeight(...position), position[1])
     lastSaved = [...position]
+    opening = createOpeningDirector(scene, world, document.world, document.progress, player, camera)
     world.update(...position, 1)
     const initial = world.getStats()
     initialChunkCount = initial.required
@@ -101,7 +130,7 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     camera.setTarget(player.root.position.add(new Vector3(0, 0.7, 0)), false, false, true)
     player.update(0, false, player.root.position.y)
     const p = player.root.position
-    useNavigationStore.getState().reset({ x: p.x, y: p.y, z: p.z }, document.progress.exploredFog, document.world.bounds)
+    useNavigationStore.getState().reset({ x: p.x, y: p.y, z: p.z }, document.progress.exploredFog, document.world.bounds, visibility())
     lastSavedFog = useNavigationStore.getState().fog
     saveTimer = 0
     exploreTimer = 0
@@ -109,7 +138,8 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     lightingTimer = 0
   }
   async function checkpoint() {
-    if (!ready || !world || useWorldStore.getState().document?.world !== activePlan) return
+    if (!ready || !world || opening?.active || useWorldStore.getState().document?.world !== activePlan) return
+    flashlight.update(0, useFlashlightStore.getState().enabled)
     flushSurvival()
     const owner = activePlan
     const position = [player.root.position.x, player.root.position.z]
@@ -117,12 +147,16 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     const staminaState = stamina.snapshot()
     const staminaKey = JSON.stringify(staminaState)
     const worldTime = dayNight.snapshot()
-    if (lastSaved && Math.hypot(position[0] - lastSaved[0], position[1] - lastSaved[1]) < 0.05 && fog === lastSavedFog && staminaKey === lastSavedStamina && Math.abs(worldTime - lastSavedWorldTime) < 0.0001) return
-    if (await useWorldStore.getState().dispatch({ type: 'checkpoint', position, fog, stamina: staminaState, worldTime }) && activePlan === owner) {
+    const flashlightState = flashlight.snapshot(), flashlightKey = JSON.stringify(flashlightState)
+    const combatState = combat.snapshot(), combatKey = JSON.stringify(combatState)
+    if (lastSaved && Math.hypot(position[0] - lastSaved[0], position[1] - lastSaved[1]) < 0.05 && fog === lastSavedFog && staminaKey === lastSavedStamina && flashlightKey === lastSavedFlashlight && combatKey === lastSavedCombat && Math.abs(worldTime - lastSavedWorldTime) < 0.0001) return
+    if (await useWorldStore.getState().dispatch({ type: 'checkpoint', position, fog, stamina: staminaState, worldTime, flashlight: flashlightState, combat: combatState }) && activePlan === owner) {
+      lastSavedCombat = combatKey
       lastSaved = position
       lastSavedFog = fog
       lastSavedStamina = staminaKey
       lastSavedWorldTime = worldTime
+      lastSavedFlashlight = flashlightKey
     }
   }
   syncWorld(useWorldStore.getState().document)
@@ -130,10 +164,13 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
   const unsubscribePhase = useGameStore.subscribe((state, previous) => {
     if (state.phase !== previous.phase) {
       input.clear()
+      combat?.clear()
+      headshotShake=0
+      if(ready && !opening?.active) camera.setTarget(player.root.position.add(new Vector3(0,.7,0)),false,false,true)
       usePlayerStatusStore.getState().publish({ ...stamina.hud(), mode: stamina.snapshot().exhausted ? 'exhausted' : 'idle' })
       if (previous.phase === 'playing' || state.phase === 'playing') {
         const p = player.root.position
-        useNavigationStore.getState().update({ x: p.x, y: p.y, z: p.z }, player.root.rotation.y)
+        useNavigationStore.getState().update({ x: p.x, y: p.y, z: p.z }, player.root.rotation.y, visibility())
       }
       if (previous.phase === 'playing') checkpoint()
     }
@@ -161,14 +198,23 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
           useNavigationStore.getState().update({ x: position.x, y: position.y, z: position.z }, player.root.rotation.y)
           return
         }
+        if (!opening?.active) {
+          const spawnState = spawning.update(0, position, player.root.rotation.y, visibility(), useWorldStore.getState().document.progress, { initial: true, paused: useDebugStore.getState().pauseSpawning })
+          useSpawnStatsStore.getState().publish(spawnState)
+          if (!spawnState.ready) { onLoading?.({ progress: 96, label: `正在准备附近感染者 ${spawnState.active}/${SPAWN_LIMITS.active}` }); return }
+        }
         ready = true
         onLoading?.({ progress: 100, label: '世界准备完成' })
+        opening?.start()
         onReady?.()
       }
     }
-    if (useGameStore.getState().phase !== 'playing') return
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.05)
+    opening?.update(dt)
+    if (!ready || opening?.active || useGameStore.getState().phase !== 'playing') combat?.update(0,spawning,world)
+    if (!ready || opening?.active || useGameStore.getState().phase !== 'playing') return
     dayNight.update(dt)
+    flashlight.update(dt, useFlashlightStore.getState().enabled)
     lightingTimer += dt
     if (lightingTimer >= 0.1) {
       lightingTimer = 0
@@ -200,14 +246,26 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     const running = debug.infiniteSprint ? moving && sprintAllowed : stamina.update(dt, moving, sprintAllowed)
     foodDecay += SURVIVAL.foodPerSecond * dt * (running ? 1.5 : 1)
     waterDecay += SURVIVAL.waterPerSecond * dt * (running ? 2 : 1)
-    if (moving) player.root.rotation.y = Math.atan2(direction.x, direction.z)
+    combat.facePointer()
     player.update(dt, moving, world.terrain.surfaceHeight(position.x, position.z), running)
-    camera.setTarget(position.add(new Vector3(0, 0.7, 0)), false, false, true)
+    torch.position.set(position.x,position.y+1.35,position.z)
+    torch.direction.set(Math.sin(player.root.rotation.y),-0.08,Math.cos(player.root.rotation.y))
+    torch.intensity = flashlight.snapshot().enabled ? 5 : 0
+    spawning.update(dt,position,player.root.rotation.y,visibility(),useWorldStore.getState().document.progress,{paused:debug.pauseSpawning})
+    combat.update(dt,spawning,world,{moving,running})
+    if(spawning.consumeShake()) headshotShake=.12
+    headshotShake=Math.max(0,headshotShake-dt)
+    const envelope=headshotShake/.12
+    const shakeX=Math.sin((.12-headshotShake)*110)*.055*envelope
+    const shakeZ=Math.cos((.12-headshotShake)*85)*.04*envelope
+    camera.setTarget(position.add(new Vector3(shakeX, .7, shakeZ)), false, false, true)
     navigationTimer += dt
     if (navigationTimer >= 0.1) {
       navigationTimer = 0
       usePlayerStatusStore.getState().publish(debug.infiniteSprint ? { ...stamina.hud(), mode: running ? 'running' : moving ? 'walking' : 'idle' } : stamina.hud())
-      useNavigationStore.getState().update({ x: position.x, y: position.y, z: position.z }, player.root.rotation.y)
+      useNavigationStore.getState().update({ x: position.x, y: position.y, z: position.z }, player.root.rotation.y, visibility())
+      useFlashlightStore.getState().publish(flashlight.hud())
+      useSpawnStatsStore.getState().publish(spawning.getStats())
     }
     saveTimer += dt
     exploreTimer += dt
@@ -235,7 +293,11 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     engine.onResizeObservable.remove(resizeObserver)
     input.dispose()
     delete canvas.dataset.runtime
+    opening?.dispose()
     player.dispose()
+    combat?.dispose()
+    spawning?.dispose()
+    useSpawnStatsStore.getState().publish({active:0,visible:0,planned:0,deferred:0})
     world?.dispose()
   })
   return scene

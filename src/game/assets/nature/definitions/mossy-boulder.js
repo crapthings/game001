@@ -1,9 +1,13 @@
-import { box, cylinder, sphere, defineProp as defineNature } from '../../props/primitives.js'
+import { sphere, defineProp as defineNature } from '../../props/primitives.js'
 
 export default defineNature({
-  assetId: 'nature.mossy-boulder', name: '覆苔巨石',
-  zones: ["forest","wetland"], tags: ["rock"],
-  radius: 1.0,
+  assetId: 'nature.mossy-boulder', name: '覆苔巨石', zones: ['forest', 'wetland'], tags: ['rock'], radius: 1.0,
 }, {
-  default: () => [sphere([2,1.4,1.6],[0,0.62,0],'#777b6e'),sphere([1.2,0.19,0.95],[-0.16,1.22,0],'#5c704b'),sphere([0.58,0.19,0.65],[0.69,0.75,0.15],'#687b50')],
+  default: () => [
+    sphere([1.65, 1.3, 1.5], [-.1, .52, 0], '#74796e'),
+    sphere([.9, .75, 1.05], [.5, .3, .1], '#858779'),
+    sphere([.9, .14, .75], [-.25, 1.1, -.1], '#596d48'),
+    sphere([.55, .13, .5], [.15, 1.02, .18], '#758351'),
+    sphere([.4, .12, .5], [.65, .6, .1], '#65784c'),
+  ],
 })

@@ -1,8 +1,7 @@
 import { create } from 'zustand'
-import { createWorldRepository } from '../game/persistence/worldRepository.js'
+import { ACTIVE_SEED_KEY, createWorldSeed } from '../game/world/generation/seed.js'
 import { applyProgress } from '../game/world/progress.js'
 
-const repository = () => createWorldRepository(window.localStorage)
 let operations = Promise.resolve()
 const enqueue = (task) => {
   const operation = operations.then(task)
@@ -14,10 +13,10 @@ const asyncRepository = async () => (await import('../game/persistence/asyncWorl
 export const useWorldStore = create((set, get) => ({
   document: null,
   error: null,
-  seed: 'first-light',
+  seed: createWorldSeed(),
   initialize: () => {
     if (get().document) return
-    try { set({ seed: repository().getActiveSeed(), error: null }) }
+    try { set({ seed: window.localStorage.getItem(ACTIVE_SEED_KEY) || get().seed, error: null }) }
     catch (error) { set({ error: error.message }) }
   },
   openWorld: (seed) => enqueue(async () => {
@@ -30,17 +29,6 @@ export const useWorldStore = create((set, get) => ({
       return false
     }
   }),
-  addNewRegions: () => {
-    try {
-      const document = get().document
-      if (!document) return false
-      set({ document: repository().extend(document), error: null })
-      return true
-    } catch (error) {
-      set({ error: `区域扩展失败：${error.message}` })
-      return false
-    }
-  },
   dispatch: (event) => {
     const owner = get().document?.world
     return enqueue(async () => {

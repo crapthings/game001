@@ -2,8 +2,8 @@ import { defineRoad } from './roadProfiles.js'
 import { roundRoadPath } from './roadGeometry.js'
 import { createTerrainRouter } from './createTerrainRouter.js'
 
-export function createRegionalRoadPlan(settlements, topography = null) {
-  const router = topography ? createTerrainRouter(settlements, topography) : null
+export function createRegionalRoadPlan(settlements, topography = null, obstacles = []) {
+  const router = topography ? createTerrainRouter([...settlements, ...obstacles], topography) : null
   const candidates = []
   for (let from = 0; from < settlements.length; from += 1) for (let to = from + 1; to < settlements.length; to += 1) {
     let best

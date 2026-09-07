@@ -1,3 +1,7 @@
+import { ACTIVE_SEED_KEY, createWorldSeed } from '../world/generation/seed.js'
+import { validCombat } from '../combat/weapons.js'
+import { validOpeningProgress } from '../world/opening/openingProgress.js'
+import { validateOpening } from '../world/opening/validateOpening.js'
 import { roadPoints } from '../world/roads/roadGeometry.js'
 import { generateWorld, normalizeSeed, appendNewRegions } from '../world/generation/generateWorld.js'
 import { createProgress } from '../world/progress.js'
@@ -8,16 +12,22 @@ import { validStamina } from '../entities/createStamina.js'
 import { validWorldTime } from '../world/createDayNightCycle.js'
 import { validInventory } from '../inventory/inventory.js'
 import { validSurvival } from '../entities/survival.js'
+import { validFlashlight } from '../entities/createFlashlight.js'
+import { getSpawnPlan } from '../spawning/createSpawnPlan.js'
+import { zombieCatalog } from '../assets/zombies/catalog.js'
 
 const SCHEMA_VERSION = 2
-const PREFIX = 'game001:world:v2:'
-const ACTIVE_KEY = 'game001:active-seed:v2'
+const PREFIX = 'game001:world:v3:'
+const ACTIVE_KEY = ACTIVE_SEED_KEY
 const validPath = (road) => Array.isArray(roadPoints(road)) && roadPoints(road).length >= 2 && roadPoints(road).every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite))
 
 export function validateDocument(document, seed) {
   if (document?.schemaVersion !== SCHEMA_VERSION) throw new Error('存档版本不兼容，已保留原始数据。')
   const world = document.world, progress = document.progress
-  if (world?.seed !== seed || world.generatorVersion !== 2 || world.planVersion !== 2 || !Array.isArray(world.regions) || world.regions.length === 0 || !Number.isInteger(document.revision)) throw new Error('世界存档无效，已保留原始数据。')
+  if (progress?.combat !== undefined && !validCombat(progress.combat)) throw new Error('武器存档无效。')
+  if (world?.seed !== seed || world.generatorVersion !== 3 || world.planVersion !== world.generatorVersion || !Array.isArray(world.regions) || world.regions.length === 0 || !Number.isInteger(document.revision)) throw new Error('世界存档无效，已保留原始数据。')
+  if (!world.hierarchy || !world.topography) throw new Error('世界缺少基础地形。')
+  validateOpening(world)
   if (world.hierarchy) {
     const h = world.hierarchy
     if (h.version !== 1 || !Array.isArray(h.macros) || h.macros.length !== 4 || !Array.isArray(h.cells) || h.cells.length !== 64 || !Array.isArray(h.warpPhase) || h.warpPhase.length !== 2 || !h.warpPhase.every(Number.isFinite)) throw new Error('分层规划无效。')
@@ -25,9 +35,22 @@ export function validateDocument(document, seed) {
   }
   if (world.topography) {
     const field = world.topography
-    if (!world.hierarchy || field.version !== 1 || !Array.isArray(field.anchors) || field.anchors.length !== 4 || !field.anchors.every(anchor => anchor && ['x', 'z', 'height', 'moisture'].every(key => Number.isFinite(anchor[key])) && anchor.moisture >= 0 && anchor.moisture <= 1) || !Array.isArray(field.waves) || field.waves.length !== 3 || !field.waves.every(wave => wave && ['wavelength', 'amplitude', 'angle', 'phase'].every(key => Number.isFinite(wave[key])) && wave.wavelength > 0)) throw new Error('地形底图无效。')
+    if (!world.hierarchy || ![1, 2].includes(field.version) || !Array.isArray(field.anchors) || field.anchors.length !== 4 || !field.anchors.every(anchor => anchor && ['x', 'z', 'height', 'moisture'].every(key => Number.isFinite(anchor[key])) && anchor.moisture >= 0 && anchor.moisture <= 1) || !Array.isArray(field.waves) || field.waves.length !== 3 || !field.waves.every(wave => wave && ['wavelength', 'amplitude', 'angle', 'phase'].every(key => Number.isFinite(wave[key])) && wave.wavelength > 0)) throw new Error('地形底图无效。')
   }
-  if (world.unitSize !== 1 || world.size !== WORLD_SIZE || world.terrainVersion !== 2 || world.environmentVersion !== 1 || !world.bounds || !Object.entries(WORLD_BOUNDS).every(([key, value]) => world.bounds[key] === value) || !Array.isArray(world.spawn) || world.spawn.length !== 2 || !world.spawn.every(Number.isFinite)) throw new Error('2048 米世界规格无效。')
+  if (world.topography?.version === 2 && (!Array.isArray(world.topography.ridges) || world.topography.ridges.length !== 12 || !world.topography.ridges.every(ridge => ridge && ['x', 'z', 'angle', 'length', 'width', 'amplitude'].every(key => Number.isFinite(ridge[key])) && ridge.length > 0 && ridge.width > 0))) throw new Error('山脊与沟谷规划无效。')
+  const validEnvironment = world.environmentVersion === 1
+    ? world.terrainVersion === world.generatorVersion && (!world.topography || world.topography.version === 1) && !world.opening?.clearanceVersion
+    : world.environmentVersion === 2 && world.generatorVersion === 3 && world.terrainVersion === 4 && world.topography?.version === 2 && world.opening?.clearanceVersion === 2
+  if (!validEnvironment) throw new Error('地形与环境配方版本不匹配。')
+  if (world.spawnPlan) {
+    const spawn=world.spawnPlan, ids=new Set(), assets=new Set(zombieCatalog.map(item=>item.assetId))
+    if (![1,2].includes(spawn.version) || !Array.isArray(spawn.points) || spawn.points.length>4096) throw new Error('感染者出生规划无效。')
+    for (const point of spawn.points) {
+      if (!point || typeof point.id!=='string' || !/^infected-v[12]\/-?\d+\/-?\d+\/\d+$/.test(point.id) || ids.has(point.id) || !assets.has(point.assetId) || ![point.x,point.z,point.rotation].every(Number.isFinite) || Math.abs(point.x)>=1024 || Math.abs(point.z)>=1024 || !world.regions.some(region=>region.id===point.regionId)) throw new Error('感染者出生点无效。')
+      ids.add(point.id)
+    }
+  }
+  if (world.unitSize !== 1 || world.size !== WORLD_SIZE || !world.bounds || !Object.entries(WORLD_BOUNDS).every(([key, value]) => world.bounds[key] === value) || !Array.isArray(world.spawn) || world.spawn.length !== 2 || !world.spawn.every(Number.isFinite)) throw new Error('2048 米世界规格无效。')
   if (!Array.isArray(world.roads) || !world.roads.every((road) => Array.isArray(road.from) && road.from.length === 2 && road.from.every(Number.isFinite) && Array.isArray(road.to) && road.to.length === 2 && road.to.every(Number.isFinite) && Number.isFinite(road.width) && road.width > 0 && validPath(road))) throw new Error('区域道路存档无效。')
   if (!world.roads.every(road => !road.routing || (road.routing.version === 1 && road.routing.gridSize === 16 && ['length', 'wetLength', 'maxSlope'].every(key => Number.isFinite(road.routing[key]) && road.routing[key] >= 0)))) throw new Error('区域道路寻路数据无效。')
   const ids = new Set()
@@ -51,10 +74,12 @@ export function validateDocument(document, seed) {
   }
   if (!progress || !Array.isArray(progress.discoveredRegionIds) || !progress.discoveredRegionIds.every((id) => ids.has(id)) || !progress.annotations || typeof progress.annotations !== 'object' || Array.isArray(progress.annotations) || !Object.entries(progress.annotations).every(([id, text]) => ids.has(id) && typeof text === 'string' && text.length <= 160) || (progress.lastRegionId !== null && !ids.has(progress.lastRegionId))) throw new Error('进度存档无效，已保留原始数据。')
   if (progress.playerPosition != null && (!Array.isArray(progress.playerPosition) || progress.playerPosition.length !== 2 || !progress.playerPosition.every(Number.isFinite))) throw new Error('角色位置存档无效。')
+  if (progress.opening !== undefined && !validOpeningProgress(progress.opening, world)) throw new Error('开场进度存档无效。')
   if (progress.stamina !== undefined && !validStamina(progress.stamina)) throw new Error('体力存档无效。')
   if (progress.inventory !== undefined && !validInventory(progress.inventory)) throw new Error('背包存档无效。')
   if (progress.survival !== undefined && !validSurvival(progress.survival)) throw new Error('饥饿口渴存档无效。')
   if (progress.worldTime !== undefined && !validWorldTime(progress.worldTime)) throw new Error('世界时间存档无效。')
+  if (progress.flashlight !== undefined && !validFlashlight(progress.flashlight)) throw new Error('手电状态存档无效。')
   if (progress.exploredFog !== undefined && !validFog(progress.exploredFog)) throw new Error('探索迷雾存档无效，已保留原始数据。')
   if (!Array.isArray(world.settlements)) throw new Error('缺少城镇规划。')
   {
@@ -73,14 +98,19 @@ export function validateDocument(document, seed) {
       }
     }
   }
+  if (progress.killedZombieIds !== undefined) {
+    if (!Array.isArray(progress.killedZombieIds) || progress.killedZombieIds.length>4096) throw new Error('感染者死亡记录无效。')
+    const known=new Set(getSpawnPlan(world).points.map(point=>point.id))
+    if (!progress.killedZombieIds.every(id=>known.has(id)) || new Set(progress.killedZombieIds).size!==progress.killedZombieIds.length) throw new Error('感染者死亡编号无效。')
+  }
   return document
 }
 
-// 存储可注入；当前小型区域规划使用 localStorage，后续实现 IndexedDB adapter。
+// 同步存储适配器；仅支持边缘开场世界，游戏运行时使用 asyncWorldRepository。
 export function createWorldRepository(storage) {
   const keyFor = (seed) => PREFIX + encodeURIComponent(normalizeSeed(seed))
   return {
-    getActiveSeed: () => storage.getItem(ACTIVE_KEY) || storage.getItem('game001:active-seed') || 'first-light',
+    getActiveSeed: () => storage.getItem(ACTIVE_KEY) || createWorldSeed(),
     open(seed) {
       seed = normalizeSeed(seed)
       const raw = storage.getItem(keyFor(seed))

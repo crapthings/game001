@@ -1,3 +1,4 @@
+import { createWorldSeed } from '../game/world/generation/seed.js'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../stores/useGameStore.js'
@@ -24,14 +25,14 @@ export default function MenuPage() {
           <label htmlFor="world-seed" className="text-sm text-slate-300">世界种子</label>
           <div className="flex items-stretch gap-2">
             <input id="world-seed" value={seedInput} onChange={(event) => setSeedInput(event.target.value)} maxLength={80} required className="min-w-0 flex-1 rounded-xl border border-white/15 bg-slate-950 px-4 py-3 text-sm" autoComplete="off" />
-            <button type="button" aria-label="随机生成世界种子" title="随机生成世界种子" onClick={() => setSeedInput(Array.from(crypto.getRandomValues(new Uint32Array(2)), value => value.toString(36)).join('-'))} className="flex w-12 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-slate-800 text-emerald-300 transition hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300">
+            <button type="button" aria-label="随机生成世界种子" title="随机生成世界种子" onClick={() => setSeedInput(createWorldSeed(seedInput))} className="flex w-12 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-slate-800 text-emerald-300 transition hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300">
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
                 <rect x="3" y="3" width="18" height="18" rx="4" />
                 <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" /><circle cx="16" cy="8" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="8" cy="16" r="1" fill="currentColor" stroke="none" /><circle cx="16" cy="16" r="1" fill="currentColor" stroke="none" />
               </svg>
             </button>
           </div>
-          <p className="text-xs leading-5 text-slate-500">世界数据与 3D 素材只会在点击进入后加载。刷新页面会回到此菜单。</p>
+          <p className="text-xs leading-5 text-slate-500">点击骰子更换数字种子，进入后开启新游戏。使用同一种子可继续已有进度。</p>
           {error && <p role="alert" className="rounded-xl bg-red-950 p-3 text-sm text-red-100">{error}</p>}
           <button type="submit" className={buttonClass}>进入世界</button>
         </form>

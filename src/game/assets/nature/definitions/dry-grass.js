@@ -1,9 +1,14 @@
-import { box, cylinder, sphere, defineProp as defineNature } from '../../props/primitives.js'
+import { box, defineProp as defineNature } from '../../props/primitives.js'
 
 export default defineNature({
-  assetId: 'nature.dry-grass', name: '枯草丛',
-  zones: ["farmland","wilderness","roadside"], tags: ["groundcover"],
-  radius: 0,
+  assetId: 'nature.dry-grass', name: '枯草丛', zones: ['farmland', 'wilderness', 'roadside'], tags: ['groundcover'], radius: 0,
 }, {
-  default: () => [...Array.from({length:13},(_,i)=>box([0.035,0.35+(i%4)*0.1,0.018],[Math.sin(i*2.4)*0.22,0.18+(i%4)*0.05,Math.cos(i*2.4)*0.22],i%2?'#8c8860':'#a29a70',[0.2*Math.sin(i),i,0.2*Math.cos(i)]))],
+  default: () => Array.from({ length: 13 }, (_, i) => {
+    const angle = i * 2.4, height = .25 + (i % 5) * .075
+    const radius = .06 + (i % 4) * .055
+    return box([.035 + (i % 3) * .009, height, .018],
+      [Math.sin(angle) * radius, height * .46, Math.cos(angle) * radius],
+      ['#777b52', '#94915f', '#aba175'][i % 3],
+      [.16 + (i % 3) * .1, angle, .08 * Math.sin(i)])
+  }),
 })

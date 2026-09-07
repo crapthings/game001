@@ -1,8 +1,11 @@
 import { roadPoints } from '../world/roads/roadGeometry.js'
 import { FOG_CELL_SIZE, FOG_GROUP_SIZE, REVEAL_RADIUS, isExplored } from './fog.js'
+import { traceVisibility } from './visibility.js'
+import { getSpawnPlan } from '../spawning/createSpawnPlan.js'
+import { ecologyBackdrop } from './ecologyBackdrop.js'
 
 // 只读取规划与探索数据，不触发区块生成或素材加载。北方为世界 +Z。
-export function drawMap(ctx, width, height, { center, span, position, heading, fog, plan, radar, revealMap = false }) {
+export function drawMap(ctx, width, height, { center, span, position, heading, fog, plan, radar, revealMap = false, showSpawns = false, vision = { radius: REVEAL_RADIUS, beamRange: 0 } }) {
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = '#080e0e'
   ctx.fillRect(0, 0, width, height)
@@ -38,18 +41,16 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   ctx.clip()
   ctx.fillStyle = '#293c35'
   ctx.fillRect(0, 0, width, height)
-  for (const region of plan.regions) {
-    const [x, y] = screen(...region.center)
-    ctx.fillStyle = region.color
-    ctx.globalAlpha = 0.45
-    ctx.beginPath()
-    if (region.bounds) {
-      const [left, top] = screen(region.bounds.minX, region.bounds.maxZ)
-      ctx.rect(left, top, (region.bounds.maxX - region.bounds.minX) * scale, (region.bounds.maxZ - region.bounds.minZ) * scale)
-    } else ctx.arc(x, y, region.radius * scale, 0, Math.PI * 2)
-    ctx.fill()
+  const backdrop = ecologyBackdrop(plan)
+  if (backdrop) {
+    const b = plan.bounds
+    const [left, top] = screen(b.minX, b.maxZ)
+    ctx.save()
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(backdrop, left, top, (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale)
+    ctx.restore()
   }
-  ctx.globalAlpha = 1
   const drawRoad = (road, color) => {
     const points = roadPoints(road)
     ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, road.width * scale)
@@ -90,8 +91,7 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
   ctx.save()
   ctx.beginPath()
   ctx.rect(0, 0, width, height)
-  ctx.moveTo(px + REVEAL_RADIUS * scale, py)
-  ctx.arc(px, py, REVEAL_RADIUS * scale, 0, Math.PI * 2, true)
+  traceVisibility(ctx, px, py, scale, heading, vision)
   ctx.clip('evenodd')
   ctx.fillStyle = revealMap ? 'rgba(0, 0, 0, 0)' : 'rgba(0, 0, 0, 0.4)'
   ctx.fillRect(0, 0, width, height)
@@ -123,14 +123,30 @@ export function drawMap(ctx, width, height, { center, span, position, heading, f
       const x = (town.bounds.minX + town.bounds.maxX) / 2, z = (town.bounds.minZ + town.bounds.maxZ) / 2
       if (!revealMap && !isExplored(fog, x, z)) continue
       const [sx, sy] = screen(x, z)
+      if (town.kind === 'poi') {
+        ctx.fillStyle = '#b5c798'
+        ctx.beginPath()
+        ctx.moveTo(sx, sy - 4); ctx.lineTo(sx + 4, sy); ctx.lineTo(sx, sy + 4); ctx.lineTo(sx - 4, sy); ctx.closePath()
+        ctx.fill()
+        // 全域图只显示小地标，放大后显示名称，避免挤压城市标签。
+        if (span > 1400) continue
+      }
       ctx.fillStyle = '#eee1b6'
       ctx.fillText(town.name, sx, sy - 13)
+    }
+  }
+  if (showSpawns) {
+    ctx.fillStyle='#e99882'
+    for (const point of getSpawnPlan(plan).points) {
+      if (point.x<xMin || point.x>xMax || point.z<zMin || point.z>zMax) continue
+      const [x,y]=screen(point.x,point.z)
+      ctx.beginPath();ctx.arc(x,y,2,0,Math.PI*2);ctx.fill()
     }
   }
   if (px >= 0 && py >= 0 && px <= width && py <= height) {
     ctx.strokeStyle = 'rgba(150, 227, 187, 0.2)'
     ctx.lineWidth = 1
-    ctx.beginPath(); ctx.arc(px, py, REVEAL_RADIUS * scale, 0, Math.PI * 2); ctx.stroke()
+    ctx.beginPath(); traceVisibility(ctx, px, py, scale, heading, vision); ctx.stroke()
     ctx.translate(px, py)
     ctx.rotate(heading)
     ctx.shadowBlur = 10
