@@ -1,3 +1,7 @@
+import { projectileShape } from './projectileShape.js'
+import { getBuildingDefinition } from '../../assets/buildings/catalog.js'
+import { getVillageBuildingDefinition } from '../../assets/village/catalog.js'
+import { createSpatialGrid } from '../../core/createSpatialGrid.js'
 import { ENVIRONMENT_ASSETS } from '../biomes/environmentField.js'
 import { openingBlocksPlacement } from '../opening/openingGeometry.js'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
@@ -19,6 +23,7 @@ export function createStreamedWorld(scene, plan) {
   const terrain = createTerrain(plan.seed, towns, plan)
   const assets = createAssetRegistry(scene)
   const loaded = new Map()
+  const collisionIndex=createSpatialGrid(8), projectileIndex=createSpatialGrid(8)
   const locks = new Map(), dynamicColliders = new Map()
   const pinned = () => new Map([...locks.values()].flat().map(chunk => [chunk.key, chunk]))
   const material = new StandardMaterial('terrain-material', scene)
@@ -86,7 +91,7 @@ export function createStreamedWorld(scene, plan) {
     yield
     createStreetSection(scene, root, chunk, data, plan.seed)
     yield
-    const colliders = []
+    const colliders = [], projectileColliders=[]
     for (const placement of data.placements) {
       if (openingBlocksPlacement(plan.opening, placement, environmentCatalog[placement.assetId])) continue
       if (!placement.planned && !placement.building && !placement.decoration && plan.regions.some((region) => region.placements.length > 0 && Math.hypot(placement.position[0] - region.center[0], placement.position[2] - region.center[1]) < region.radius)) continue
@@ -97,6 +102,11 @@ export function createStreamedWorld(scene, plan) {
       if (!placement.building && !placement.decoration && townSurface(towns, x, z)?.weight > 0.5) continue
       assets.create(placement, root, placement.regionId)
       const definition = environmentCatalog[placement.assetId]
+      const shape=projectileShape(definition,placement.assetId)
+      const building=getBuildingDefinition(placement.assetId) || getVillageBuildingDefinition(placement.assetId)
+      if((shape && shape.radius>0) || building) {
+        projectileColliders.push({x,z,y:placement.position[1],scale:placement.scale,cosine:Math.cos(placement.rotation),sine:Math.sin(placement.rotation),shape,building})
+      }
       const footprint = placement.footprint || definition?.footprint
       if (footprint) {
         colliders.push({ x, z, rotation: placement.rotation, halfWidth: footprint.width * placement.scale / 2, halfDepth: footprint.depth * placement.scale / 2 })
@@ -107,7 +117,18 @@ export function createStreamedWorld(scene, plan) {
       yield
     }
     root.setEnabled(true)
-    loaded.set(chunk.key, { root, colliders })
+    for(const obstacle of colliders) {
+      const cosine=Math.cos(obstacle.rotation || 0),sine=Math.sin(obstacle.rotation || 0)
+      obstacle.cosine=cosine;obstacle.sine=sine
+      const extentX=obstacle.radius ?? (Math.abs(cosine)*obstacle.halfWidth+Math.abs(sine)*obstacle.halfDepth)
+      const extentZ=obstacle.radius ?? (Math.abs(sine)*obstacle.halfWidth+Math.abs(cosine)*obstacle.halfDepth)
+      collisionIndex.add(obstacle,obstacle.x-extentX,obstacle.z-extentZ,obstacle.x+extentX,obstacle.z+extentZ)
+    }
+    for(const obstacle of projectileColliders) {
+      const extent=(obstacle.shape?.radius || Math.hypot(obstacle.building.footprint.width,obstacle.building.footprint.depth)/2)*obstacle.scale
+      projectileIndex.add(obstacle,obstacle.x-extent,obstacle.z-extent,obstacle.x+extent,obstacle.z+extent)
+    }
+    loaded.set(chunk.key, { root, colliders, projectileColliders })
   }
   function update(x, z, budgetMs = 3) {
     if (failure) throw failure
@@ -143,6 +164,8 @@ export function createStreamedWorld(scene, plan) {
       if (!locked.has(key) && (Math.abs(cx - center.x) > KEEP_RADIUS || Math.abs(cz - center.z) > KEEP_RADIUS)) {
         entry.root.setEnabled(false)
         retired.push(entry.root)
+        for(const obstacle of entry.colliders) collisionIndex.remove(obstacle)
+        for(const obstacle of entry.projectileColliders) projectileIndex.remove(obstacle)
         loaded.delete(key)
       }
     }
@@ -188,19 +211,45 @@ export function createStreamedWorld(scene, plan) {
     getStats: () => ({ loaded: loaded.size, queued: required.filter((chunk) => !loaded.has(chunk.key)).length, required: required.length, ready: required.filter((chunk) => loaded.has(chunk.key)).length, templatesReady: templateCount - warmup.length, templatesTotal: templateCount, pending: Boolean(pending), assembling: Boolean(assembling), center }),
     // 所有导航与移动共用这层检查，不依赖美术模型的三角面。
     isLoaded(x,z) { const at=chunkAt(x,z); return loaded.has(chunkKey(at.x,at.z)) },
+    projectileBlocked(x,y,z,checkGround=true) {
+      if(!insideWorld(plan.bounds,x,z,1) || !loaded.has(chunkKey(Math.floor(x/CHUNK_SIZE),Math.floor(z/CHUNK_SIZE)))) return true
+      if(checkGround && y<=terrain.surfaceHeight(x,z)+.02) return true
+      for(const obstacle of projectileIndex.query(x,z,x,z)) {
+        const dx=x-obstacle.x,dz=z-obstacle.z
+        const lx=(dx*obstacle.cosine-dz*obstacle.sine)/obstacle.scale
+        const lz=(dx*obstacle.sine+dz*obstacle.cosine)/obstacle.scale,ly=(y-obstacle.y)/obstacle.scale
+        if(obstacle.shape?.contains(lx,ly,lz)) return true
+        const b=obstacle.building
+        if(b && ly>=0 && ly<=((b.floors || 1)*(b.floorHeight || 3)+1.5) && Math.abs(lx)<=b.width/2 && Math.abs(lz)<=b.depth/2) return true
+      }
+      for(const sample of dynamicColliders.values()) {
+        const obstacle=sample()
+        if(!obstacle) continue
+        const bottom=obstacle.y ?? terrain.surfaceHeight(obstacle.x,obstacle.z)
+        if(y<bottom || y>bottom+(obstacle.height ?? 1.5)) continue
+        const dx=x-obstacle.x,dz=z-obstacle.z,c=Math.cos(obstacle.rotation||0),s=Math.sin(obstacle.rotation||0)
+        if(obstacle.radius!==undefined ? Math.hypot(dx,dz)<obstacle.radius : Math.abs(dx*c-dz*s)<obstacle.halfWidth && Math.abs(dx*s+dz*c)<obstacle.halfDepth) return true
+      }
+      return false
+    },
     canMove(x, z, radius = HUMAN_SCALE.collisionRadius, ignoreId = null) {
       if (!insideWorld(plan.bounds, x, z, 1)) return false
       const at = chunkAt(x, z)
       if (!loaded.has(chunkKey(at.x, at.z))) return false
-      const dynamic = [...dynamicColliders].filter(([id]) => id !== ignoreId).map(([, sample]) => sample()).filter(Boolean)
-      for (const entry of [...loaded.values(), { colliders: dynamic }]) {
-        if (entry.colliders.some((obstacle) => {
-          const dx = x - obstacle.x, dz = z - obstacle.z
-          if (obstacle.radius !== undefined) return Math.hypot(dx, dz) < obstacle.radius + radius
-          const cosine = Math.cos(obstacle.rotation), sine = Math.sin(obstacle.rotation)
-          const localX = dx * cosine - dz * sine, localZ = dx * sine + dz * cosine
-          return Math.abs(localX) < obstacle.halfWidth + radius && Math.abs(localZ) < obstacle.halfDepth + radius
-        })) return false
+      const blocks = obstacle => {
+        const dx=x-obstacle.x,dz=z-obstacle.z
+        if(obstacle.radius!==undefined) return Math.hypot(dx,dz)<obstacle.radius+radius
+        const cosine=obstacle.cosine ?? Math.cos(obstacle.rotation),sine=obstacle.sine ?? Math.sin(obstacle.rotation)
+        const localX=dx*cosine-dz*sine,localZ=dx*sine+dz*cosine
+        return Math.abs(localX)<obstacle.halfWidth+radius && Math.abs(localZ)<obstacle.halfDepth+radius
+      }
+      // 原精确判定在矩形两个局部轴上加 radius，外接范围需覆盖旋转后的膨胀。
+      const margin=radius*Math.SQRT2
+      for(const obstacle of collisionIndex.query(x-margin,z-margin,x+margin,z+margin)) if(blocks(obstacle)) return false
+      for(const [id,sample] of dynamicColliders) {
+        if(id===ignoreId) continue
+        const obstacle=sample()
+        if(obstacle && blocks(obstacle)) return false
       }
       return true
     },
@@ -214,6 +263,8 @@ export function createStreamedWorld(scene, plan) {
       queue = []
       for (const entry of loaded.values()) entry.root.dispose()
       loaded.clear()
+      collisionIndex.clear()
+      projectileIndex.clear()
       locks.clear()
       dynamicColliders.clear()
       assets.dispose()

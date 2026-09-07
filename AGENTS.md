@@ -1,3 +1,4 @@
 - 不运行测试。
 - 不运行 build。
 - 不运行 lint。
+- HTML 界面的下拉菜单统一使用 `@floating-ui/react` 实现。

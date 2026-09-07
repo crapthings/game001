@@ -41,8 +41,8 @@ export function createOpeningDirector(scene, world, plan, progress, player, game
   }
   vehicle.root.position.copyFrom(terrainPoint(stage === 'complete' ? opening.parking.position : opening.entry))
   vehicle.root.rotation.y = opening.parking.yaw
-  releases.push(world.addCollider('opening-vehicle', () => ({ x: vehicle.root.position.x, z: vehicle.root.position.z, rotation: vehicle.root.rotation.y, halfWidth: 1.2, halfDepth: 2.3 })))
-  releases.push(world.addCollider('opening-roadblock', () => ({ x: block.position[0], z: block.position[1], rotation: block.yaw, halfWidth: block.width / 2, halfDepth: block.depth / 2 })))
+  releases.push(world.addCollider('opening-vehicle', () => ({ x: vehicle.root.position.x, z: vehicle.root.position.z, rotation: vehicle.root.rotation.y, y: vehicle.root.position.y, height: 1.5, halfWidth: 1.2, halfDepth: 2.3 })))
+  releases.push(world.addCollider('opening-roadblock', () => ({ x: block.position[0], z: block.position[1], rotation: block.yaw, height: 1.15, halfWidth: block.width / 2, halfDepth: block.depth / 2 })))
   if (stage !== 'complete') {
     const b = opening.preloadBounds
     // 固定镜头最远裁剪 64m，限制横/纵 FOV；96m 余量覆盖整个视锥。

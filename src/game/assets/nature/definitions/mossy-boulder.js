@@ -1,7 +1,7 @@
 import { sphere, defineProp as defineNature } from '../../props/primitives.js'
 
 export default defineNature({
-  assetId: 'nature.mossy-boulder', name: '覆苔巨石', zones: ['forest', 'wetland'], tags: ['rock'], radius: 1.0,
+  assetId: 'nature.mossy-boulder', name: '覆苔巨石', zones: ['forest', 'wetland'], tags: ['rock'], radius: 1.0, projectileParts: [0, 1],
 }, {
   default: () => [
     sphere([1.65, 1.3, 1.5], [-.1, .52, 0], '#74796e'),

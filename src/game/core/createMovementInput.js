@@ -1,3 +1,4 @@
+import { screenDirection } from './screenDirection.js'
 const sprintKeys = new Set(['ShiftLeft', 'ShiftRight'])
 const controls = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
 
@@ -16,13 +17,11 @@ export function createMovementInput(isPlaying) {
   return {
     clear,
     wantsSprint: () => keys.has('ShiftLeft') || keys.has('ShiftRight'),
-    direction() {
+    direction(beta) {
       const horizontal = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft'))
       const vertical = Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown'))
       if (horizontal || vertical) {
-        const x = horizontal - vertical, z = horizontal + vertical
-        const length = Math.hypot(x, z)
-        return { x: x / length, z: z / length }
+        return screenDirection(horizontal,vertical,beta)
       }
       return { x: 0, z: 0 }
     },

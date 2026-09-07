@@ -220,7 +220,7 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
       lightingTimer = 0
       applyLighting()
     }
-    const direction = input.direction(position)
+    const direction = input.direction(camera.beta)
     const wantsSprint = input.wantsSprint()
     const needs = useWorldStore.getState().document?.progress.survival
     const depleted = needs && (needs.food <= 0 || needs.water <= 0)
@@ -247,17 +247,17 @@ export function createWorldScene(engine, canvas, { onLoading, onReady } = {}) {
     foodDecay += SURVIVAL.foodPerSecond * dt * (running ? 1.5 : 1)
     waterDecay += SURVIVAL.waterPerSecond * dt * (running ? 2 : 1)
     combat.facePointer()
-    player.update(dt, moving, world.terrain.surfaceHeight(position.x, position.z), running)
+    player.update(dt, moving, world.terrain.surfaceHeight(position.x, position.z), running, { x: position.x-oldX, z: position.z-oldZ })
     torch.position.set(position.x,position.y+1.35,position.z)
     torch.direction.set(Math.sin(player.root.rotation.y),-0.08,Math.cos(player.root.rotation.y))
     torch.intensity = flashlight.snapshot().enabled ? 5 : 0
     spawning.update(dt,position,player.root.rotation.y,visibility(),useWorldStore.getState().document.progress,{paused:debug.pauseSpawning})
     combat.update(dt,spawning,world,{moving,running})
-    if(spawning.consumeShake()) headshotShake=.12
+    if(spawning.consumeShake()) headshotShake=.18
     headshotShake=Math.max(0,headshotShake-dt)
-    const envelope=headshotShake/.12
-    const shakeX=Math.sin((.12-headshotShake)*110)*.055*envelope
-    const shakeZ=Math.cos((.12-headshotShake)*85)*.04*envelope
+    const envelope=(headshotShake/.18)**1.5
+    const shakeX=Math.sin((.18-headshotShake)*95)*.14*envelope
+    const shakeZ=Math.cos((.18-headshotShake)*75)*.1*envelope
     camera.setTarget(position.add(new Vector3(shakeX, .7, shakeZ)), false, false, true)
     navigationTimer += dt
     if (navigationTimer >= 0.1) {

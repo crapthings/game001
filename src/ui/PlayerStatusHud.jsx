@@ -1,3 +1,4 @@
+import FlashlightHud from './FlashlightHud.jsx'
 import { usePlayerStatusStore } from '../stores/usePlayerStatusStore.js'
 import { useWorldStore } from '../stores/useWorldStore.js'
 
@@ -20,6 +21,7 @@ export default function PlayerStatusHud() {
         <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} className="h-1.5 overflow-hidden rounded bg-stone-700/70"><div className={`h-full transition-[width] ${value <= 20 ? 'bg-orange-400' : color}`} style={{ width: `${value}%` }} /></div>
       </div>)}
       <p className="mt-2 text-[10px] text-stone-500">{food === 0 || water === 0 ? '饥饿 / 脱水 · 无法奔跑' : food <= 20 ? '需要进食' : water <= 20 ? '需要补水' : 'Shift 奔跑'}</p>
+      <FlashlightHud />
     </aside>
   )
 }

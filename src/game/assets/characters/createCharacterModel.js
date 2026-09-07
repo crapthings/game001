@@ -1,13 +1,14 @@
+import { zombieAppearance } from '../zombies/appearance.js'
 import { createPlayer } from '../../entities/createPlayer.js'
 import { PLAYER_ASSET_ID } from './catalog.js'
 import { zombieDefinitions } from '../zombies/catalog.js'
 import { createZombieModel } from '../zombies/createZombieModel.js'
 
-const factories = { [PLAYER_ASSET_ID]: createPlayer, ...Object.fromEntries(zombieDefinitions.map(definition => [`character.zombie.${definition.id}`, scene => createZombieModel(scene, definition)])) }
+const factories = { [PLAYER_ASSET_ID]: createPlayer, ...Object.fromEntries(zombieDefinitions.map(definition => [`character.zombie.${definition.id}`, (scene,appearance) => createZombieModel(scene, zombieAppearance(definition,appearance))])) }
 
 // 保留角色的关节、动画与释放接口，不合并成静态建筑模板。
-export function createCharacterModel(scene, assetId) {
+export function createCharacterModel(scene, assetId, appearance = 0) {
   const factory = factories[assetId]
   if (!factory) throw new Error(`未知角色资产：${assetId}`)
-  return factory(scene)
+  return factory(scene,appearance)
 }

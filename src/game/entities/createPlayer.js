@@ -86,8 +86,9 @@ export function createPlayer(scene) {
   box('radio', [0.13, 0.19, 0.09], [0.29, 1.47, 0.25], boots)
   box('radio-antenna', [0.018, 0.19, 0.018], [0.33, 1.65, 0.25], steel)
 
+  const lowerBody=joint('lower-body',[0,0,0])
   const legs = [-1, 1].map((side) => {
-    const hip = joint(`hip:${side}`, [side * 0.18, 0.88, 0])
+    const hip = joint(`hip:${side}`, [side * 0.18, 0.88, 0], lowerBody)
     box(`trouser-thigh:${side}`, [0.27, 0.42, 0.3], [0, -0.2, 0], trousers, hip)
     box(`cargo-pocket:${side}`, [0.07, 0.19, 0.21], [side * 0.16, -0.22, 0], seams, hip)
     const knee = joint(`knee:${side}`, [0, -0.4, 0], hip)
@@ -120,19 +121,27 @@ export function createPlayer(scene) {
   return {
     root,
     setEnabled(enabled) { root.setEnabled(enabled); shadow.setEnabled(enabled) },
-    update(dt, moving, height, running = false) {
+    update(dt, moving, height, running = false, movement = null) {
       time += dt
       stride += ((moving ? 1 : 0) - stride) * Math.min(1, dt * 14)
-      if (moving) gait += dt * (running ? 18 : 12)
+      let backward=false,legYaw=0
+      if(moving && movement) {
+        const relative=Math.atan2(movement.x,movement.z)-root.rotation.y
+        legYaw=Math.atan2(Math.sin(relative),Math.cos(relative))
+        backward=Math.abs(legYaw)>Math.PI/2
+        if(backward) legYaw+=legYaw>0?-Math.PI:Math.PI
+        gait+=Math.hypot(movement.x,movement.z)/(running?2.4:1.6)*Math.PI*2
+      } else if(moving) gait+=dt*(running?18:12)
+      lowerBody.rotation.y+=(legYaw-lowerBody.rotation.y)*(1-Math.exp(-dt*14))
       root.position.y = height
       rig.position.y = Math.sin(gait * 2) * 0.018 * stride
-      rig.rotation.x = (running ? 0.16 : 0.045) * stride
+      rig.rotation.x = (running ? 0.1 : 0.025) * stride * (backward?-1:1)
       backpack.rotation.x = Math.sin(gait + 0.4) * 0.035 * stride
       for (let index = 0; index < 2; index += 1) {
-        const swing = Math.sin(gait + index * Math.PI)
+        const swing = Math.sin(gait + index * Math.PI)*(backward?-1:1)
         legs[index].hip.rotation.x = swing * (running ? 0.65 : 0.42) * stride
         legs[index].knee.rotation.x = Math.max(0, -swing) * 0.38 * stride
-        arms[index].rotation.x = -swing * (running ? 0.55 : 0.32) * stride - 0.06
+        arms[index].rotation.x = movement ? -.65-swing*.06*stride : -swing*(running ? .55 : .32)*stride-.06
       }
       // 静止时仅轻微呼吸，不改变根节点坐标或存档位置。
       const breathing = Math.sin(time * 2) * 0.002 * (1 - stride)

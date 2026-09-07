@@ -70,9 +70,11 @@ export default function InventoryPanel() {
           </div>
           <aside className="rounded-xl border border-white/10 bg-black/20 p-4">
             {item ? <><p className="text-[10px] tracking-widest text-emerald-300/60">{item.category}</p><h2 className="mt-2 text-lg">{item.name}</h2><p className="mt-3 text-xs leading-6 text-stone-400">{item.description}</p><dl className="mt-4 space-y-2 text-xs text-stone-400"><div>数量 {stack.count} / {item.maxStack}</div><div>单件 {item.weight.toFixed(2)} kg</div><div>合计 {(item.weight * stack.count).toFixed(2)} kg</div></dl>
+              <p className="mt-3 text-xs leading-5 text-emerald-100/80">用途：{item.purpose}</p>
+              {item.status === 'planned' && <p className="mt-2 text-[10px] text-amber-200/80">该用途尚未开放</p>}
               <div className="mt-5 flex flex-wrap gap-2"><button disabled={pending} className={buttonClass} onClick={() => setMoving(value => !value)}>{moving ? '取消移动' : '移动 / 合并'}</button><button disabled={pending || stack.count < 2 || !bag.slots.includes(null)} className={buttonClass} onClick={() => act({ action:'split', index:selected })}>拆分一半</button></div>
               {item.effects && <button disabled={pending} className={`${buttonClass} mt-3`} onClick={() => act({ type: 'consume', index: selected })}>使用一份</button>}
-              <p className="mt-4 text-[10px] leading-5 text-stone-500">前 10 格对应快捷栏 1–9、0。食物和饮水可直接使用，医疗功能尚未开放。</p>
+              <p className="mt-4 text-[10px] leading-5 text-stone-500">前 6 格对应快捷栏 5–9、0；1–4 为武器，G 为手雷。食物和饮水可直接使用，医疗功能尚未开放。</p>
             </> : <p className="text-sm text-stone-500">空格 · 可存放搜集的物品</p>}
           </aside>
         </div>

@@ -1,5 +1,8 @@
-// 程序合成短音色，首次交互时缓存；每次射击只播放缓存，不加载外部素材。
+import reloadUrl from '../assets/audio/weapons/reload.mp3?url'
+
+// 射击使用合成缓存，换弹使用本地 MP3；音频解码后复用。
 const profiles = {
+  explosion: { duration: .65, pitch: 55, noise: 1, decay: 8, lowpass: .13, volume: .42 },
   pistol: { duration: .19, pitch: 170, noise: .7, decay: 30, lowpass: .55, volume: .3 },
   shotgun: { duration: .42, pitch: 85, noise: .9, decay: 14, lowpass: .2, volume: .38 },
   rifle: { duration: .16, pitch: 135, noise: .85, decay: 36, lowpass: .65, volume: .26 },
@@ -9,6 +12,12 @@ const profiles = {
 export function createWeaponAudio() {
   let context=null, master=null, disposed=false
   const buffers=new Map(), voices=new Set()
+  const loadController=new AbortController()
+  const reloadData=fetch(reloadUrl,{signal:loadController.signal}).then(response=>{
+    if(!response.ok) throw new Error('换弹音效读取失败')
+    return response.arrayBuffer()
+  }).catch(()=>null)
+  let sampledReload=false
   function synth(profile, variant=0) {
     const rate=context.sampleRate, buffer=context.createBuffer(1,Math.ceil(profile.duration*rate),rate)
     const data=buffer.getChannelData(0)
@@ -37,6 +46,13 @@ export function createWeaponAudio() {
         for(const [id,profile] of Object.entries(profiles)) buffers.set(id,[-1,0,1].map(variant=>synth(profile,variant)))
         buffers.set('reload-out',[synth({duration:.1,pitch:520,noise:.4,decay:55,lowpass:.8})])
         buffers.set('reload-in',[synth({duration:.14,pitch:340,noise:.55,decay:38,lowpass:.7})])
+        reloadData.then(data=>{
+          if(!data || disposed) return null
+          return context.decodeAudioData(data)
+        }).then(buffer=>{
+          if(!buffer || disposed) return
+          buffers.set('reload-out',[buffer]);sampledReload=true
+        }).catch(()=>{})
       }
       if(context.state==='suspended') context.resume().catch(()=>{})
     } catch { /* 音频不可用不阻断游戏。 */ }
@@ -48,21 +64,23 @@ export function createWeaponAudio() {
     voices.clear()
   }
   return {
-    play(id) {
+    play(id,{duration}={}) {
       if(disposed || context?.state!=='running') return
+      if(id==='reload-in' && sampledReload) return
       const choices=buffers.get(id)
       if(!choices) return
       if(voices.size>=12) { const oldest=voices.values().next().value;oldest.stop();voices.delete(oldest) }
       const source=context.createBufferSource(), gain=context.createGain()
       source.buffer=choices[Math.floor(Math.random()*choices.length)]
-      gain.gain.value=profiles[id]?.volume ?? .19
+      if(id==='reload-out' && sampledReload && duration>0) source.playbackRate.value=source.buffer.duration/duration
+      gain.gain.value=profiles[id]?.volume ?? (sampledReload ? .5 : .19)
       source.connect(gain);gain.connect(master);voices.add(source)
       source.onended=()=>{voices.delete(source);source.disconnect();gain.disconnect()}
       source.start()
     },
     stop,
     dispose() {
-      disposed=true;stop();buffers.clear()
+      disposed=true;loadController.abort();stop();buffers.clear()
       window.removeEventListener('pointerdown',unlock,true);window.removeEventListener('keydown',unlock,true)
       context?.close().catch(()=>{})
     },

@@ -10,8 +10,6 @@ import InventoryPanel from './InventoryPanel.jsx'
 import Quickbar from './Quickbar.jsx'
 import DebugMenu from './DebugMenu.jsx'
 import { useDebugStore } from '../stores/useDebugStore.js'
-import FlashlightHud from './FlashlightHud.jsx'
-import WeaponHud from './WeaponHud.jsx'
 
 const buttonClass = 'rounded-xl border border-white/15 bg-slate-800 px-5 py-3 text-sm font-medium transition hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300'
 
@@ -22,7 +20,7 @@ export default function GameOverlay() {
   const resumeGame = useGameStore((state) => state.resumeGame)
   const returnToMenu = useGameStore((state) => state.returnToMenu)
   const error = useWorldStore((state) => state.error)
-  const debugActive = useDebugStore(state => state.infiniteAmmo || state.revealMap || state.infiniteSprint || state.sprintMultiplier !== 1 || state.pauseSpawning || state.showSpawns)
+  const debugActive = useDebugStore(state => state.infiniteGrenades || state.infiniteAmmo || state.revealMap || state.infiniteSprint || state.sprintMultiplier !== 1 || state.pauseSpawning || state.showSpawns)
   const errorMessage = error && <p role="alert" className="rounded-xl bg-red-950 p-3 text-sm text-red-100">{error}</p>
 
   if (phase === 'loading') return null
@@ -34,12 +32,10 @@ export default function GameOverlay() {
         <RadarHud />
         <PlayerStatusHud />
         <WorldTimeHud />
-        <FlashlightHud />
-        {phase === 'playing' && <button type="button" onClick={() => useGameStore.getState().openDebug()} className={`absolute left-4 top-20 z-10 rounded border border-white/10 bg-black/65 px-2 py-1 text-[10px] hover:text-emerald-200 ${debugActive ? 'text-amber-300' : 'text-stone-400'}`}>{debugActive ? '调试已启用' : '开发'} · F2</button>}
+        {phase === 'playing' && <button type="button" aria-label={`打开开发调试（F2）${debugActive ? '，调试已启用' : ''}`} title="开发调试 · F2" onClick={() => useGameStore.getState().openDebug()} className={`absolute left-4 top-4 z-10 flex h-12 w-12 items-center justify-center rounded-full border bg-[radial-gradient(circle_at_35%_25%,#34483e,#101916_75%)] font-mono text-xs font-semibold shadow-lg transition hover:brightness-125 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 ${debugActive ? 'border-amber-200/50 text-amber-200' : 'border-white/20 text-emerald-100'}`}><span>F2</span>{debugActive && <span aria-hidden="true" className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full border border-[#101916] bg-amber-300" />}</button>}
         {phase === 'map' && <WorldMap />}
         {phase === 'inventory' && <InventoryPanel />}
         {phase === 'playing' && <Quickbar />}
-        {phase === 'playing' && <WeaponHud />}
 
         {error && <div className="absolute bottom-4 right-4 z-30 max-w-sm">{errorMessage}</div>}
       </>

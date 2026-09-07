@@ -1,18 +1,16 @@
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
-import { Color3 } from '@babylonjs/core/Maths/math.color'
+import { acquireZombieMaterial } from './sharedMaterials.js'
 
 // 米制、脚底原点、朝向 +Z；与玩家共用 root/update/dispose 接口。
 export function createZombieModel(scene, definition) {
   const d = definition, prefix = `zombie:${d.id}`
   const root = new TransformNode(prefix, scene), rig = new TransformNode(`${prefix}:rig`, scene)
   rig.parent = root
-  const materials = {}, meshes = []
+  const materials = {}, meshes = [], leases = []
   for (const [name, color] of Object.entries({ skin: d.skin, cloth: d.cloth, pants: d.pants, accent: d.accent, dark: '#29332e', eyes: '#c3c5a4' })) {
-    const mat = new StandardMaterial(`${prefix}:${name}`, scene)
-    mat.diffuseColor = Color3.FromHexString(color); mat.specularColor = Color3.Black()
-    materials[name] = mat
+    const lease=acquireZombieMaterial(scene,color)
+    materials[name]=lease.material;leases.push(lease)
   }
   const joint = (name, position, parent = rig) => {
     const node = new TransformNode(`${prefix}:${name}`, scene)
@@ -89,14 +87,16 @@ export function createZombieModel(scene, definition) {
   const cycleDistance = crawling ? .8 * scale : 4 * .75 * scale * Math.sin(strideAngle) * .85
   const locomotion = { cycleDistance, speed: cycleDistance * d.gait / (Math.PI * 2) }
   return {
-    root, locomotion,
+    root,
+    get locomotion() { return {cycleDistance:locomotion.cycleDistance*root.scaling.z,speed:locomotion.speed*root.scaling.z} },
+    reset() { time=0;walkPhase=0;root.rotation.set(0,0,0);pose() },
     update(dt, moving, height, running = false, travelled = null) {
       time += dt
-      if(moving) walkPhase += travelled === null ? dt*d.gait*(running?1.6:1) : Math.max(0,travelled)/cycleDistance*Math.PI*2
+      if(moving) walkPhase += travelled === null ? dt*d.gait*(running?1.6:1) : Math.max(0,travelled)/(cycleDistance*root.scaling.z)*Math.PI*2
       walkPhase %= Math.PI*2
       root.position.y = height
       pose(moving,running)
     },
-    dispose() { root.dispose(); Object.values(materials).forEach(material => material.dispose()) },
+    dispose() { root.dispose(); leases.forEach(lease => lease.release()) },
   }
 }
